@@ -1,0 +1,68 @@
+/* Container overlay */
+#rcp__overlay.rcp__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647; /* above most things */
+  background: rgba(0,0,0,0.25);
+}
+
+/* Centered palette box */
+#rcp__box.rcp__box {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  background: #111;
+  color: #eee;
+  border: 1px solid #333;
+  border-radius: 0;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+  overflow: hidden;
+  font: 14px/1.3 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Input */
+#rcp__input.rcp__input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: none;
+  outline: none;
+  background: #1a1a1a;
+  color: #fff;
+  font-size: 15px;
+}
+
+/* List */
+#rcp__list.rcp__list {
+  max-height: 50vh;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+}
+
+#rcp__list .rcp__item {
+  padding: 8px 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  cursor: default;
+}
+
+#rcp__list .rcp__item:hover,
+#rcp__list .rcp__item.rcp__item--active {
+  background: #2a2a2a;
+}
+
+.rcp__highlight {
+  background: yellow !important;
+  color: black !important;
+}
+
+/* Quick invert toggle */
+html.rcp__invert {
+  filter: invert(1) hue-rotate(180deg) !important;
+}

@@ -1,0 +1,13 @@
+import("//build/config/llm_mojo_tee/args.gni")
+
+source_set("core") {
+  # ...existing sources/defines/deps...
+
+  if (enable_llm_mojo_tee) {
+    defines += [ "ENABLE_LLM_MOJO_TEE=1" ]
+    sources += [
+      "tee_ring_writer.cc",
+      "tee_ring_writer.h",
+    ]
+  }
+}

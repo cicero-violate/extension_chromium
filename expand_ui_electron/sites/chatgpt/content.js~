@@ -1,0 +1,10 @@
+// /expand_uio/sites/chatgpt/content.js
+console.log("running chatgpt content.js");
+// Can rerun on DOMContentLoaded if needed
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", () =>
+    window.ExpandMessages.expandMessages()
+  );
+} else {
+  window.ExpandMessages.expandMessages();
+}

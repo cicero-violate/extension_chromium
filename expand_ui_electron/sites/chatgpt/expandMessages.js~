@@ -1,0 +1,20 @@
+function observeAndExpand() {
+  window.ExpandMessages.expandMessages();
+
+  const observer = new MutationObserver(() => {
+    window.ExpandMessages.expandMessages();
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+}
+
+if (window.ExpandMessages) {
+  observeAndExpand();
+} else {
+  // Wait for expandMessages.js to load
+  const check = setInterval(() => {
+    if (window.ExpandMessages) {
+      clearInterval(check);
+      observeAndExpand();
+    }
+  }, 100);
+}

@@ -1,0 +1,66 @@
+{
+  "manifest_version": 3,
+  "name": "Expand UI",
+  "version": "1.0.0",
+  "description": "Custom UI tweaks per website",
+
+  "action": {
+    "default_popup": "popup.html"
+  },
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "permissions": [
+    "tabs",
+    "activeTab",
+    "scripting"
+  ],
+
+  "host_permissions": [
+    "*://*.perplexity.ai/*",
+    "*://*.chatgpt.com/*",
+    "*://*.claude.ai/*",
+    "*://*.gemini.google.com/*",
+    "*://*.grok.com/*",
+    "*://*.x.ai/*",
+    "*://x.com/*",
+    "*://twitter.com/*"
+  ],
+
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.perplexity.ai/*",
+        "*://*.chatgpt.com/*",
+        "*://*.claude.ai/*",
+        "*://*.gemini.google.com/*"
+      ],
+      "js": [
+        "sites/chatgpt/expandMessages.js",
+        "sites/chatgpt/content.js"
+      ],
+      "css": [
+        "sites/chatgpt/style.css"
+      ],
+      "run_at": "document_end"
+    },
+    {
+      "matches": [
+        "*://*.grok.com/*",
+        "*://*.x.ai/*",
+        "*://x.com/*",
+        "*://twitter.com/*"
+      ],
+      "js": [
+        "sites/grok/expandMessages.js",
+        "sites/grok/content.js"
+      ],
+      "css": [
+        "sites/grok/style.css"
+      ],
+      "run_at": "document_end"
+    }
+  ]
+}

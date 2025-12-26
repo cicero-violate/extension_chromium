@@ -1,0 +1,1 @@
+/home/cicero-arch-omen/ai_sandbox/extension_chromium/llm_extension/rs_native_messaging/target/debug/rs_native_messaging: /home/cicero-arch-omen/ai_sandbox/extension_chromium/llm_extension/rs_native_messaging/src/main.rs
