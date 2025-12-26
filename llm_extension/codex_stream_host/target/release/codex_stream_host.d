@@ -1,1 +1,0 @@
-/home/cicero-arch-omen/ai_sandbox/extension_chromium/llm_extension/codex_stream_host/target/release/codex_stream_host: /home/cicero-arch-omen/ai_sandbox/extension_chromium/llm_extension/codex_stream_host/src/main.rs
