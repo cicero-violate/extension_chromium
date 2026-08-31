@@ -1,414 +1,290 @@
-/* background.js — MV3 safe & defensive */
+/* background.js — MV3 service worker for "Right-Click Plus + Palette".
+ *
+ * Responsibilities:
+ *   - build the page context menu and act on clicks
+ *   - toggle the command palette (keyboard command + toolbar icon)
+ *   - open URLs requested by the palette content script
+ *
+ * palette.css / content.js are declared as content scripts in the manifest, so
+ * they load automatically on every page. We only inject them by hand for tabs
+ * that were already open when the extension was installed or updated.
+ */
 
-// ---------- Helpers ----------
+// ---------- URL helpers ----------
+const RESTRICTED_PREFIXES = [
+  "chrome://",
+  "edge://",
+  "brave://",
+  "about:",
+  "devtools://",
+  "view-source:",
+  "chrome-extension://",
+  "moz-extension://",
+  "https://chrome.google.com/webstore",
+  "https://chromewebstore.google.com",
+];
+
 function isRestrictedUrl(url) {
   if (!url) return true;
-  return (
-    url.startsWith("chrome://") ||
-    url.startsWith("edge://") ||
-    url.startsWith("about:") ||
-    url.startsWith("devtools://") ||
-    url.startsWith("chrome-extension://") ||
-    url.startsWith("https://chrome.google.com/webstore")
-  );
+  return RESTRICTED_PREFIXES.some((prefix) => url.startsWith(prefix));
 }
 
-async function ensureTab(tab) {
+async function getActiveTab(tab) {
   if (tab && tab.id != null) return tab;
   const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
   return active || null;
 }
 
-async function safeExecScript(tabId, opts) {
+// ---------- Scripting helpers ----------
+async function execScript(tabId, opts) {
   try {
-    await chrome.scripting.executeScript({
-    target: { tabId },
-    ...opts
-    });
-    return true;
+    return await chrome.scripting.executeScript({ target: { tabId }, ...opts });
   } catch (e) {
     console.warn("[RCP] executeScript failed:", e);
-    return false;
+    return null;
   }
 }
 
-async function safeInsertCSS(tabId, file) {
+async function injectPalette(tabId) {
   try {
-    await chrome.scripting.insertCSS({
-      target: { tabId },
-      files: [file]
-    });
-    return true;
-  } catch (e) {
-    // okay if already injected or blocked
-    return false;
+    await chrome.scripting.insertCSS({ target: { tabId }, files: ["palette.css"] });
+  } catch (_) {
+    /* already present or blocked — fine */
   }
+  await execScript(tabId, { files: ["content.js"] });
 }
 
-async function ensurePaletteInjected(tabId) {
-  await safeInsertCSS(tabId, "palette.css");
-  await safeExecScript(tabId, { files: ["content.js"] });
-}
+async function togglePalette(tab) {
+  tab = await getActiveTab(tab);
+  if (!tab || tab.id == null || isRestrictedUrl(tab.url || "")) return;
 
-async function sendPaletteMessage(tab, message) {
-  tab = await ensureTab(tab);
-  if (!tab || tab.id == null) return;
-
-  const url = tab.url || "";
-  if (isRestrictedUrl(url)) return;
-
+  const message = { type: "RCP_TOGGLE_PALETTE" };
   try {
     await chrome.tabs.sendMessage(tab.id, message);
   } catch (_) {
-    await ensurePaletteInjected(tab.id);
+    // Content script not there yet (tab predates install) — inject and retry.
+    await injectPalette(tab.id);
     try {
       await chrome.tabs.sendMessage(tab.id, message);
     } catch (e) {
-      console.warn("[RCP] sendPaletteMessage failed after inject:", e);
+      console.warn("[RCP] togglePalette failed after inject:", e);
     }
   }
 }
 
-async function togglePaletteOnTab(tab) {
-  await sendPaletteMessage(tab, { type: "RCP_TOGGLE_PALETTE" });
+async function copyInPage(tabId, text) {
+  await execScript(tabId, {
+    args: [text],
+    func: async (value) => {
+      try {
+        await navigator.clipboard.writeText(value);
+      } catch (_) {
+        const ta = document.createElement("textarea");
+        ta.value = value;
+        ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+          document.execCommand("copy");
+        } catch (_) {
+          /* give up silently */
+        }
+        ta.remove();
+      }
+    },
+  });
 }
 
-// ---------- Context menus ----------
+/* Injected into the page. Must be fully self-contained (it is serialised via
+ * Function.prototype.toString by chrome.scripting). Highlights every match of
+ * `selection`, or removes the highlight if that exact group is already active.
+ *
+ *   mode "exact" — highlight the literal selected string
+ *   mode "words" — highlight each distinct whole word in the selection
+ */
+function highlightInPage(selection, mode) {
+  const COLORS = [
+    "#fff59d", "#c8e6c9", "#ffcc80", "#e1bee7", "#b3e5fc", "#ffcdd2",
+    "#d1c4e9", "#f0f4c3", "#ffe0b2", "#bbdefb", "#f8bbd0", "#dcedc8",
+  ];
+  const SKIP_TAGS = new Set([
+    "SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT", "MARK",
+  ]);
+  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  let groupKey;
+  let regex;
+  if (mode === "words") {
+    const words = Array.from(
+      new Set(
+        selection
+          .split(/\s+/)
+          .map((w) => w.trim().toLowerCase())
+          .filter(Boolean)
+      )
+    );
+    if (!words.length) return;
+    groupKey = "words:" + words.slice().sort().join("|");
+    regex = new RegExp("\\b(" + words.map(escapeRe).join("|") + ")\\b", "gi");
+  } else {
+    const term = selection.trim();
+    if (!term) return;
+    groupKey = "exact:" + term.toLowerCase();
+    regex = new RegExp(escapeRe(term), "gi");
+  }
+
+  // Toggle off: if this group is already highlighted, unwrap it and stop.
+  const existing = Array.from(
+    document.querySelectorAll("mark.rcp__highlight")
+  ).filter((m) => m.dataset.rcpGroup === groupKey);
+  if (existing.length) {
+    existing.forEach((mark) => {
+      const parent = mark.parentNode;
+      if (!parent) return;
+      parent.replaceChild(document.createTextNode(mark.textContent || ""), mark);
+      parent.normalize();
+    });
+    return;
+  }
+
+  if (!document.body) return;
+
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  const targets = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    const parent = node.parentElement;
+    if (!parent || SKIP_TAGS.has(parent.tagName)) continue;
+    if (parent.closest("mark.rcp__highlight")) continue;
+    regex.lastIndex = 0;
+    if (regex.test(node.nodeValue)) targets.push(node);
+  }
+  if (!targets.length) return;
+
+  const idx = ((window.__rcpColorIndex ?? -1) + 1) % COLORS.length;
+  window.__rcpColorIndex = idx;
+  const color = COLORS[idx];
+
+  targets.forEach((node) => {
+    const text = node.nodeValue;
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    let match;
+    regex.lastIndex = 0;
+    while ((match = regex.exec(text)) !== null) {
+      if (match.index > last) {
+        frag.appendChild(document.createTextNode(text.slice(last, match.index)));
+      }
+      const mark = document.createElement("mark");
+      mark.className = "rcp__highlight";
+      mark.dataset.rcpGroup = groupKey;
+      mark.style.setProperty("background-color", color, "important");
+      mark.textContent = match[0];
+      frag.appendChild(mark);
+      last = match.index + match[0].length;
+      if (match[0].length === 0) regex.lastIndex++; // guard against zero-width matches
+    }
+    if (last < text.length) {
+      frag.appendChild(document.createTextNode(text.slice(last)));
+    }
+    node.parentNode.replaceChild(frag, node);
+  });
+}
+
+// ---------- Context menu ----------
+const MENU_ITEMS = [
+  { id: "rcp_search_selection", title: "Search selection…", contexts: ["selection"] },
+  { id: "rcp_highlight_exact", title: "Highlight selection (exact)", contexts: ["selection"] },
+  { id: "rcp_highlight_words", title: "Highlight each word (toggle)", contexts: ["selection"] },
+  { id: "rcp_copy_link", title: "Copy link URL", contexts: ["link"] },
+  { id: "rcp_image_info", title: "Image info → src", contexts: ["image"] },
+];
+
+function buildMenus() {
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: "rcp_root",
+      title: "Right-Click Plus",
+      contexts: ["all"],
+    });
+    for (const item of MENU_ITEMS) {
+      chrome.contextMenus.create({ ...item, parentId: "rcp_root" });
+    }
+  });
+}
+
 chrome.runtime.onInstalled.addListener(() => {
-
-  chrome.contextMenus.create({
-    id: "rcp_root",
-    title: "Right-Click Plus",
-    contexts: ["all"]
+  buildMenus();
+  // Make the palette available on tabs that were open before install/update.
+  chrome.tabs.query({}, (tabs) => {
+    for (const tab of tabs) {
+      if (tab.id != null && !isRestrictedUrl(tab.url || "")) injectPalette(tab.id);
+    }
   });
-
-  chrome.contextMenus.create({
-    id: "rcp_hello",
-    parentId: "rcp_root",
-    title: "Say Hello",
-    contexts: ["all"]
-  });
-
-  chrome.contextMenus.create({
-    id: "rcp_search_selection",
-    parentId: "rcp_root",
-    title: "Search selection…",
-    contexts: ["selection"]
-  });
-
-  chrome.contextMenus.create({
-    id: "rcp_highlight_exact",
-    title: "Highlight selection (exact)",
-    contexts: ["selection"]
-  });
-
-  chrome.contextMenus.create({
-    id: "rcp_highlight_similar_group",
-    parentId: "rcp_root",
-    title: "Highlight similar words (yellow)",
-    contexts: ["selection"]
-  });
-
-  chrome.contextMenus.create({
-    id: "rcp_copy_link",
-    parentId: "rcp_root",
-    title: "Copy link URL",
-    contexts: ["link"]
-  });
-
-  chrome.contextMenus.create({
-    id: "rcp_image_info",
-    parentId: "rcp_root",
-    title: "Image info → alt / src",
-    contexts: ["image"]
-  });
-
 });
+
+// Context menus can be dropped when the service worker is recycled.
+chrome.runtime.onStartup.addListener(buildMenus);
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   try {
-    tab = await ensureTab(tab);
-    if (!tab || tab.id == null) return;
-    if (isRestrictedUrl(tab.url || "")) return;
+    tab = await getActiveTab(tab);
+    if (!tab || tab.id == null || isRestrictedUrl(tab.url || "")) return;
 
     switch (info.menuItemId) {
-
-      case "rcp_hello": {
-        await safeExecScript(tab.id, {
-          func: () => alert("Hello from Right-Click Plus 👋")
-        });
-        break;
-      }
-
       case "rcp_search_selection": {
         const q = (info.selectionText || "").trim();
         if (!q) return;
         await chrome.tabs.create({
           url: "https://duckduckgo.com/?q=" + encodeURIComponent(q),
-          index: (tab.index ?? 0) + 1
+          index: (tab.index ?? 0) + 1,
         });
         break;
       }
 
       case "rcp_copy_link": {
-        const linkUrl = info.linkUrl || "";
-        if (!linkUrl) return;
-        await safeExecScript(tab.id, {
-          args: [linkUrl],
-          func: async (url) => {
-            try { await navigator.clipboard.writeText(url); }
-            catch { alert("Could not copy link."); }
-          }
-        });
+        if (info.linkUrl) await copyInPage(tab.id, info.linkUrl);
         break;
       }
 
       case "rcp_image_info": {
-        const src = info.srcUrl || "";
-        if (!src) return;
-        await safeExecScript(tab.id, {
-          args: [src],
-          func: (s) => alert(`Image src: ${s}`)
+        if (!info.srcUrl) return;
+        await execScript(tab.id, {
+          args: [info.srcUrl],
+          func: (src) => window.alert("Image src:\n" + src),
         });
         break;
       }
 
-      case "rcp_highlight_exact": {
-	const selected = (info.selectionText || "").trim();
-	if (!selected) return;
-
-	await safeExecScript(tab.id, {
-	  args: [selected],
-	  func: (selection) => {
-	    // exact highlight version (no groups)
-	    const escaped = selection.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-	    const re = new RegExp(escaped, "gi");
-
-	    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-	    const nodes = [];
-
-	    while (walker.nextNode()) {
-	      const node = walker.currentNode;
-	      const parent = node.parentElement;
-	      if (!parent) continue;
-	      if (["SCRIPT","STYLE","NOSCRIPT","TEXTAREA","INPUT"].includes(parent.tagName)) continue;
-
-	      re.lastIndex = 0;
-	      if (re.test(node.nodeValue)) nodes.push(node);
-	    }
-
-	    if (!nodes.length) return;
-
-	    // const colors = ["#fff59d", "#c8e6c9", "#ffcc80", "#e1bee7"]; 
-	    const colors = [
-	      "#fff59d", // soft yellow
-	      "#c8e6c9", // green
-	      "#ffcc80", // orange
-	      "#e1bee7", // purple
-	      "#b3e5fc", // baby blue
-	      "#ffcdd2", // soft red
-	      "#d1c4e9", // lavender
-	      "#f0f4c3", // lime
-	      "#ffe0b2", // peach
-	      "#bbdefb", // light blue
-	      "#f8bbd0", // pink
-	      "#dcedc8"  // mint
-	    ];
-
-	    // if (!window.__rcpColorIndex && window.__rcpColorIndex !== 0) {
-	    //   window.__rcpColorIndex = 0;
-	    // }
-
-	    if (typeof window.__rcpColorIndex !== "number") {
-	      window.__rcpColorIndex = 0;
-	    }
-
-	    const color = colors[window.__rcpColorIndex];
-	    window.__rcpColorIndex = (window.__rcpColorIndex + 1) % colors.length;
-
-	    nodes.forEach(node => {
-	      const text = node.nodeValue;
-	      const frag = document.createDocumentFragment();
-	      re.lastIndex = 0;
-	      let lastIndex = 0;
-	      let match;
-
-	      while ((match = re.exec(text)) !== null) {
-		const before = text.slice(lastIndex, match.index);
-		if (before) frag.appendChild(document.createTextNode(before));
-
-		const mark = document.createElement("mark");
-		mark.style.backgroundColor = color;
-		mark.textContent = match[0];
-		frag.appendChild(mark);
-
-		lastIndex = match.index + match[0].length;
-	      }
-
-	      const after = text.slice(lastIndex);
-	      if (after) frag.appendChild(document.createTextNode(after));
-
-	      node.parentNode.replaceChild(frag, node);
-	    });
-	  }
-	});
-
-	break;
-      }
-
-      case "rcp_highlight_similar_group": {
-        const selected = (info.selectionText || "").trim();
-        if (!selected) return;
-
-        await safeExecScript(tab.id, {
-          args: [selected],
-          func: (selection) => {
-            // ---- Highlight similar logic ----
-            const rawWords = (selection || "")
-              .split(/\s+/)
-              .map(w => w.trim())
-              .filter(Boolean);
-
-            if (!rawWords.length) return;
-
-            const escapeRegex = (str) =>
-              str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-            const wordMap = new Map();
-            rawWords.forEach(word => {
-              const canonical = word.toLowerCase();
-              if (!wordMap.has(canonical)) wordMap.set(canonical, word);
-            });
-
-            if (!wordMap.size) return;
-
-            const groupKey = Array.from(wordMap.keys())
-              .sort()
-              .join("|");
-
-            const existingMarks = Array.from(
-              document.querySelectorAll("mark.rcp__highlight")
-            ).filter(m => m.dataset.rcpGroup === groupKey);
-
-            if (existingMarks.length) {
-              existingMarks.forEach(mark => {
-                const parent = mark.parentNode;
-                if (!parent) return;
-                const textNode = document.createTextNode(mark.textContent || "");
-                parent.replaceChild(textNode, mark);
-                parent.normalize();
-              });
-              return;
-            }
-
-            const escapedWords = Array.from(wordMap.values()).map(escapeRegex);
-	    // const re = new RegExp(`(${escapedWords.join("|")})`, "gi");
-	    const re = new RegExp(`\\b(${escapedWords.join("|")})\\b`, "gi");
-
-
-            const walker = document.createTreeWalker(
-              document.body,
-              NodeFilter.SHOW_TEXT,
-              null
-            );
-
-            const nodes = [];
-            while (walker.nextNode()) {
-              const node = walker.currentNode;
-              if (!node.parentElement) continue;
-
-              const tag = node.parentElement.tagName;
-              if (["SCRIPT","STYLE","NOSCRIPT","TEXTAREA","INPUT"].includes(tag))
-                continue;
-
-              if (node.parentElement.closest("mark.rcp__highlight"))
-                continue;
-
-              re.lastIndex = 0;
-              if (re.test(node.nodeValue)) nodes.push(node);
-            }
-
-            if (!nodes.length) return;
-
-	    // const colors = ["#fff59d", "#c8e6c9", "#ffcc80", "#e1bee7"]; 
-	    const colors = [
-	      "#fff59d", // soft yellow
-	      "#c8e6c9", // green
-	      "#ffcc80", // orange
-	      "#e1bee7", // purple
-	      "#b3e5fc", // baby blue
-	      "#ffcdd2", // soft red
-	      "#d1c4e9", // lavender
-	      "#f0f4c3", // lime
-	      "#ffe0b2", // peach
-	      "#bbdefb", // light blue
-	      "#f8bbd0", // pink
-	      "#dcedc8"  // mint
-	    ];
-
-	    // if (!window.__rcpColorIndex && window.__rcpColorIndex !== 0) {
-	    //   window.__rcpColorIndex = 0; // persistent across toggles
-	    // }
-	    if (typeof window.__rcpColorIndex !== "number") {
-	      window.__rcpColorIndex = 0;
-	    }
-
-	    const color = colors[window.__rcpColorIndex];
-	    window.__rcpColorIndex = (window.__rcpColorIndex + 1) % colors.length;
-
-
-            nodes.forEach(node => {
-              const text = node.nodeValue;
-              const frag = document.createDocumentFragment();
-              let lastIndex = 0;
-              re.lastIndex = 0;
-
-              let match;
-              while ((match = re.exec(text)) !== null) {
-                const before = text.slice(lastIndex, match.index);
-                if (before) frag.appendChild(document.createTextNode(before));
-
-                const mark = document.createElement("mark");
-                mark.className = "rcp__highlight";
-                mark.dataset.rcpGroup = groupKey;
-                mark.style.backgroundColor = color;
-                mark.textContent = match[0];
-                frag.appendChild(mark);
-
-                lastIndex = match.index + match[0].length;
-              }
-
-              const after = text.slice(lastIndex);
-              if (after) frag.appendChild(document.createTextNode(after));
-
-              node.parentNode.replaceChild(frag, node);
-            });
-          }
-        });
-
+      case "rcp_highlight_exact":
+      case "rcp_highlight_words": {
+        const sel = (info.selectionText || "").trim();
+        if (!sel) return;
+        const mode = info.menuItemId === "rcp_highlight_words" ? "words" : "exact";
+        await execScript(tab.id, { args: [sel, mode], func: highlightInPage });
         break;
       }
     }
-
   } catch (e) {
     console.error("[RCP] contextMenus.onClicked error:", e);
   }
 });
 
-// ---------- Command palette ----------
-chrome.commands.onCommand.addListener(async (command) => {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (command === "open-palette") {
-    await togglePaletteOnTab(tab || null);
-    return;
-  }
+// ---------- Palette triggers ----------
+chrome.commands.onCommand.addListener((command) => {
+  if (command === "open-palette") togglePalette(null);
 });
 
-// Warm inject on completed navigations
-chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
-  if (info.status !== "complete") return;
-  const url = tab?.url || "";
-  if (isRestrictedUrl(url)) return;
-  await ensurePaletteInjected(tabId);
-});
+chrome.action.onClicked.addListener((tab) => togglePalette(tab));
 
+// URLs the palette asks us to open (it can't call chrome.tabs itself).
+chrome.runtime.onMessage.addListener((msg, sender) => {
+  if (msg?.type !== "RCP_OPEN_URL" || !msg.url) return;
+  const opener = sender.tab;
+  chrome.tabs
+    .create({
+      url: msg.url,
+      index: opener?.index != null ? opener.index + 1 : undefined,
+    })
+    .catch((e) => console.warn("[RCP] open URL failed:", msg.url, e));
+});

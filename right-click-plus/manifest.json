@@ -1,7 +1,7 @@
 {
   "name": "Right-Click Plus + Palette",
   "description": "Context menu actions + an Emacs-style command palette (M-x) for Chromium.",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "manifest_version": 3,
   "permissions": [
     "contextMenus",
@@ -43,6 +43,6 @@
     }
   },
   "action": {
-    "default_title": "Right-Click Plus + Palette"
+    "default_title": "Right-Click Plus + Palette (Alt+X)"
   }
 }

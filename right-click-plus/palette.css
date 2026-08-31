@@ -1,28 +1,32 @@
-/* Container overlay */
+/* Full-width backdrop */
 #rcp__overlay.rcp__overlay {
   position: fixed;
   inset: 0;
-  z-index: 2147483647; /* above most things */
-  background: rgba(0,0,0,0.25);
+  z-index: 2147483647; /* above almost anything */
+  background: rgba(0, 0, 0, 0.25);
 }
 
-/* Centered palette box */
+#rcp__overlay[hidden] {
+  display: none !important;
+}
+
+/* Minibuffer-style palette pinned to the top */
 #rcp__box.rcp__box {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   width: 100%;
+  box-sizing: border-box;
   background: #111;
   color: #eee;
   border: 1px solid #333;
-  border-radius: 0;
-  box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
   overflow: hidden;
-  font: 14px/1.3 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif;
+  font: 14px/1.3 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Cantarell,
+    "Helvetica Neue", Arial, sans-serif;
 }
 
-/* Input */
 #rcp__input.rcp__input {
   display: block;
   width: 100%;
@@ -35,7 +39,6 @@
   font-size: 15px;
 }
 
-/* List */
 #rcp__list.rcp__list {
   max-height: 50vh;
   overflow-y: auto;
@@ -57,9 +60,21 @@
   background: #2a2a2a;
 }
 
-.rcp__highlight {
-  background: yellow !important;
-  color: black !important;
+#rcp__list .rcp__item--empty {
+  color: #888;
+  font-style: italic;
+}
+
+#rcp__list .rcp__item--empty:hover {
+  background: transparent;
+}
+
+/* Selection highlights — the background colour is set inline (with !important)
+ * by the injector so it can cycle through a palette; keep it out of here. */
+mark.rcp__highlight {
+  color: #111 !important;
+  border-radius: 2px;
+  padding: 0 1px;
 }
 
 /* Quick invert toggle */

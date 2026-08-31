@@ -1,15 +1,12 @@
-// Lightweight M-x style palette injected into pages
-void function initRcpContentScript() {
-  if (typeof window === "undefined") return;
-  if (window.__RCP_CONTENT_INITIALIZED) return;
+/* content.js — Emacs-style (M-x) command palette injected into every page.
+ *
+ * Opened/closed with Alt+X (or the toolbar icon) via a RCP_TOGGLE_PALETTE
+ * message from the service worker. Typing filters; ArrowUp/Down move the
+ * selection; Enter runs it; Esc (or a click on the backdrop) closes it.
+ */
+void (function initRcpPalette() {
+  if (typeof window === "undefined" || window.__RCP_CONTENT_INITIALIZED) return;
   window.__RCP_CONTENT_INITIALIZED = true;
-
-  const RCP_IDS = {
-    overlay: "rcp__overlay",
-    box: "rcp__box",
-    input: "rcp__input",
-    list: "rcp__list"
-  };
 
   const state = {
     open: false,
@@ -18,60 +15,85 @@ void function initRcpContentScript() {
     list: null,
     items: [],
     filtered: [],
-    selectedIndex: 0
+    selectedIndex: 0,
   };
 
-  // --- Commands available in the palette ---
+  // ---------- Small helpers ----------
+  function sendMessage(msg) {
+    try {
+      chrome.runtime?.sendMessage(msg);
+    } catch (_) {
+      /* extension context invalidated (e.g. after a reload) — ignore */
+    }
+  }
+
+  const openUrl = (url) => sendMessage({ type: "RCP_OPEN_URL", url });
+  const selectionText = () => (window.getSelection()?.toString() || "").trim();
+
+  async function copy(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (_) {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+      } catch (_) {
+        /* nothing else to try */
+      }
+      ta.remove();
+    }
+  }
+
+  function clearHighlights() {
+    document.querySelectorAll("mark.rcp__highlight").forEach((mark) => {
+      const parent = mark.parentNode;
+      if (!parent) return;
+      parent.replaceChild(document.createTextNode(mark.textContent || ""), mark);
+      parent.normalize();
+    });
+  }
+
+  // ---------- Commands ----------
   const Commands = [
-    {
-      id: "hello",
-      title: "Say Hello (alert)",
-      run: () => alert("Hello from the palette 👋")
-    },
     {
       id: "search-selection",
       title: "Search selection on DuckDuckGo",
-      run: async () => {
-        const sel = (window.getSelection()?.toString() || "").trim();
-        if (!sel) return;
-        postOpenUrl(
-          "https://duckduckgo.com/?q=" + encodeURIComponent(sel)
-        );
-      }
+      run: () => {
+        const s = selectionText();
+        if (s) openUrl("https://duckduckgo.com/?q=" + encodeURIComponent(s));
+      },
     },
     {
       id: "copy-url",
       title: "Copy current page URL",
-      run: async () => {
-        await navigator.clipboard.writeText(location.href);
-      }
+      run: () => copy(location.href),
     },
     {
       id: "copy-md-link",
-      title: "Copy as Markdown link: [title](url)",
-      run: async () => {
-        const md = `[${document.title}](${location.href})`;
-        await navigator.clipboard.writeText(md);
-      }
+      title: "Copy page as Markdown link — [title](url)",
+      run: () => copy(`[${document.title}](${location.href})`),
     },
     {
       id: "copy-selection",
       title: "Copy selection text",
-      run: async () => {
-        const sel = window.getSelection()?.toString() || "";
-        if (!sel) return;
-        await navigator.clipboard.writeText(sel);
-      }
+      run: () => {
+        const s = selectionText();
+        if (s) return copy(s);
+      },
     },
     {
       id: "view-source",
       title: "Open view-source of this page",
-      run: () => postOpenUrl("view-source:" + location.href)
+      run: () => openUrl("view-source:" + location.href),
     },
     {
       id: "scroll-top",
       title: "Scroll to top",
-      run: () => window.scrollTo({ top: 0, behavior: "smooth" })
+      run: () => window.scrollTo({ top: 0, behavior: "smooth" }),
     },
     {
       id: "scroll-bottom",
@@ -79,76 +101,60 @@ void function initRcpContentScript() {
       run: () =>
         window.scrollTo({
           top: document.body.scrollHeight,
-          behavior: "smooth"
-        })
+          behavior: "smooth",
+        }),
     },
     {
       id: "toggle-invert",
-      title: "Toggle page invert (quick dark hack)",
-      run: () => {
-        document.documentElement.classList.toggle("rcp__invert");
-      }
-    }
+      title: "Toggle page invert (quick dark mode)",
+      run: () => document.documentElement.classList.toggle("rcp__invert"),
+    },
+    {
+      id: "clear-highlights",
+      title: "Clear all highlights",
+      run: clearHighlights,
+    },
   ];
 
-  function postOpenUrl(url) {
-    chrome.runtime.sendMessage({ type: "RCP_OPEN_URL", url });
-  }
-
-  // --- UI creation ---
+  // ---------- UI ----------
   function ensureRoot() {
     if (state.root && document.body.contains(state.root)) return;
 
     const overlay = document.createElement("div");
-    overlay.id = RCP_IDS.overlay;
+    overlay.id = "rcp__overlay";
     overlay.className = "rcp__overlay";
-    overlay.style.display = "none";
+    overlay.hidden = true;
 
     const box = document.createElement("div");
-    box.id = RCP_IDS.box;
+    box.id = "rcp__box";
     box.className = "rcp__box";
 
     const input = document.createElement("input");
-    input.id = RCP_IDS.input;
+    input.id = "rcp__input";
     input.className = "rcp__input";
     input.type = "text";
-    input.placeholder = "M-x … (type a command, ↑/↓, Enter, Esc)";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.placeholder = "M-x … (type to filter · ↑/↓ · Enter · Esc)";
 
     const list = document.createElement("ul");
-    list.id = RCP_IDS.list;
+    list.id = "rcp__list";
     list.className = "rcp__list";
 
-    box.appendChild(input);
-    box.appendChild(list);
-    overlay.appendChild(box);
+    box.append(input, list);
+    overlay.append(box);
     document.body.appendChild(overlay);
 
     state.root = overlay;
     state.input = input;
     state.list = list;
 
-    // Prevent page shortcuts while palette is open
-    overlay.addEventListener(
-      "keydown",
-      (e) => {
-        if (!state.open) return;
-        e.stopPropagation();
-      },
-      { capture: true }
-    );
+    input.addEventListener("input", filterAndRender);
 
-    // Input handlers
-    input.addEventListener("input", () => filterAndRender());
-
-    input.addEventListener("keydown", (e) => {
-      if (!state.open) return;
-      if (handlePaletteKey(e)) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
+    overlay.addEventListener("mousedown", (e) => {
+      if (e.target === overlay) closePalette();
     });
 
-    // Click to run
     list.addEventListener("click", (e) => {
       const li = e.target.closest("li[data-index]");
       if (!li) return;
@@ -156,17 +162,15 @@ void function initRcpContentScript() {
       runSelected();
     });
 
-    // Base items
-    state.items = Commands.slice(0);
+    state.items = Commands.slice();
     state.filtered = state.items;
-
     renderList();
   }
 
   function openPalette() {
     ensureRoot();
     state.open = true;
-    state.root.style.display = "block";
+    state.root.hidden = false;
     state.input.value = "";
     state.selectedIndex = 0;
     filterAndRender();
@@ -174,16 +178,14 @@ void function initRcpContentScript() {
   }
 
   function closePalette() {
-    if (!state.root) return;
     state.open = false;
-    state.root.style.display = "none";
+    if (state.root) state.root.hidden = true;
   }
 
   function moveSelection(delta) {
     if (!state.filtered.length) return;
-    state.selectedIndex =
-      (state.selectedIndex + delta + state.filtered.length) %
-      state.filtered.length;
+    const n = state.filtered.length;
+    state.selectedIndex = (state.selectedIndex + delta + n) % n;
     updateActive();
   }
 
@@ -191,95 +193,95 @@ void function initRcpContentScript() {
     const item = state.filtered[state.selectedIndex];
     if (!item) return;
     closePalette();
-    Promise.resolve(item.run()).catch((e) =>
-      console.error("[RCP] command error", e)
-    );
+    Promise.resolve()
+      .then(() => item.run())
+      .catch((e) => console.error("[RCP] command error:", e));
   }
 
   function renderList() {
-    state.list.innerHTML = "";
+    state.list.textContent = "";
 
+    if (!state.filtered.length) {
+      const li = document.createElement("li");
+      li.className = "rcp__item rcp__item--empty";
+      li.textContent = "No matching commands";
+      state.list.appendChild(li);
+      return;
+    }
+
+    const frag = document.createDocumentFragment();
     state.filtered.forEach((item, idx) => {
       const li = document.createElement("li");
       li.dataset.index = String(idx);
       li.className =
-        "rcp__item" +
-        (idx === state.selectedIndex ? " rcp__item--active" : "");
+        "rcp__item" + (idx === state.selectedIndex ? " rcp__item--active" : "");
       li.textContent = item.title;
-      state.list.appendChild(li);
+      frag.appendChild(li);
     });
+    state.list.appendChild(frag);
   }
 
   function updateActive() {
-    const nodes = state.list.querySelectorAll(".rcp__item");
+    const nodes = state.list.querySelectorAll("li[data-index]");
     nodes.forEach((n, i) => {
-      if (i === state.selectedIndex)
-        n.classList.add("rcp__item--active");
-      else n.classList.remove("rcp__item--active");
+      const active = i === state.selectedIndex;
+      n.classList.toggle("rcp__item--active", active);
+      if (active) n.scrollIntoView({ block: "nearest" });
     });
   }
 
-  // Simple fuzzy: case-insensitive substring with score (earlier index = better)
+  // Case-insensitive substring match, ranked by match position.
   function filterAndRender() {
     const q = state.input.value.trim().toLowerCase();
-
-    if (!q) {
-      state.filtered = state.items;
-    } else {
-      const scored = state.items
-        .map((it) => {
-          const t = it.title.toLowerCase();
-          const idx = t.indexOf(q);
-          return idx >= 0 ? { it, score: idx } : null;
-        })
-        .filter(Boolean)
-        .sort((a, b) => a.score - b.score)
-        .map((x) => x.it);
-
-      state.filtered = scored;
-    }
-
+    state.filtered = !q
+      ? state.items
+      : state.items
+          .map((it) => ({ it, score: it.title.toLowerCase().indexOf(q) }))
+          .filter((x) => x.score >= 0)
+          .sort((a, b) => a.score - b.score)
+          .map((x) => x.it);
     state.selectedIndex = 0;
     renderList();
   }
 
-  // --- Messaging from background ---
+  // ---------- Wiring ----------
   chrome.runtime.onMessage.addListener((msg) => {
-    if (msg?.type === "RCP_TOGGLE_PALETTE") {
-      if (state.open) closePalette();
-      else openPalette();
-    }
+    if (msg?.type !== "RCP_TOGGLE_PALETTE") return;
+    if (state.open) closePalette();
+    else openPalette();
   });
 
-  // Allow ESC to close even if focus drifts
-  document.addEventListener("keydown", (e) => {
-    if (!state.open) return;
-    if (handlePaletteKey(e)) {
-      e.preventDefault();
+  // One capture-phase handler. While the palette is open we swallow keydowns so
+  // the page's own shortcuts stay quiet; typing still reaches the focused input
+  // (stopPropagation does not cancel the default action) and fires `input`.
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (!state.open) return;
       e.stopPropagation();
-    }
-  });
-
-  function handlePaletteKey(event) {
-    switch (event.key) {
-      case "Escape":
-        closePalette();
-        return true;
-
-      case "ArrowDown":
-        moveSelection(1);
-        return true;
-
-      case "ArrowUp":
-        moveSelection(-1);
-        return true;
-
-      case "Enter":
-        runSelected();
-        return true;
-
-      default:
-        return false;
-    }
-  }
-}();
+      switch (e.key) {
+        case "Escape":
+          closePalette();
+          e.preventDefault();
+          break;
+        case "ArrowDown":
+          moveSelection(1);
+          e.preventDefault();
+          break;
+        case "ArrowUp":
+          moveSelection(-1);
+          e.preventDefault();
+          break;
+        case "Tab":
+          moveSelection(e.shiftKey ? -1 : 1);
+          e.preventDefault();
+          break;
+        case "Enter":
+          runSelected();
+          e.preventDefault();
+          break;
+      }
+    },
+    true
+  );
+})();
