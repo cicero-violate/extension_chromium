@@ -24,7 +24,7 @@ const DEFAULT_TAB_STATE = Object.freeze({
   repeatMessageCount: 1,
   repeatMessageSent: 0,
   repeatRestartEnabled: false,
-  repeatRestartMode: 'reload',
+  repeatRestartMode: 'new_chat',
   repeatRestartPending: false,
   repeatBootstrapPending: false,
 });
@@ -64,7 +64,7 @@ function normalizeTabState(value = {}) {
   const repeatMessageCount = Math.max(1, Math.min(1000000, Math.trunc(Number(value.repeatMessageCount) || 1)));
   const repeatMessageSent = Math.max(0, Math.trunc(Number(value.repeatMessageSent) || 0));
   const repeatRestartEnabled = value.repeatRestartEnabled === true && repeatMessageMode === 'count';
-  const repeatRestartMode = value.repeatRestartMode === 'new_chat' ? 'new_chat' : 'reload';
+  const repeatRestartMode = 'new_chat';
   const repeatLimitReached = repeatMessageMode === 'count' && repeatMessageSent >= repeatMessageCount;
   const repeatRestartPending = repeatRestartEnabled
     && repeatLimitReached
@@ -146,15 +146,16 @@ async function restartRepeatCycle(tabId) {
     repeatBootstrapPending: true,
     repeatMessageEnabled: true,
   });
+
   await chrome.storage.session.set({ [key]: next });
   await updateBadge(tabId, next);
 
-  if (current.repeatRestartMode === 'new_chat') {
-    await chrome.tabs.update(tabId, { url: 'https://chatgpt.com/' });
-  } else {
-    await chrome.tabs.reload(tabId);
-  }
-  return { restarted: true, state: next, mode: current.repeatRestartMode };
+  // Restart always means leave the current /c/<conversation> URL and return
+  // this same browser tab to the ChatGPT root. There is intentionally no
+  // chrome.tabs.reload() branch here.
+  await chrome.tabs.update(tabId, { url: 'https://chatgpt.com/' });
+
+  return { restarted: true, state: next, mode: 'new_chat', tabId };
 }
 
 function freshFleetState() {
@@ -295,6 +296,46 @@ async function supportedTab(tabId) {
     return SUPPORTED_URL.test(tab.url || '') ? tab : null;
   } catch {
     return null;
+  }
+}
+
+async function readRepeatTurnSignal(tabId) {
+  if (!Number.isInteger(tabId)) return { available: false };
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: () => {
+        const capture = window.__browserRouterSseCapture;
+        const hasRouterSignal = capture !== undefined
+          || window.__browserRouterMessageStreamComplete !== undefined
+          || window.__browserRouterMessageCompleteObserved !== undefined
+          || window.__browserRouterLastFinalTextAt !== undefined
+          || window.__browserRouterLastToolCallAt !== undefined
+          || window.__browserRouterLastToolResultAt !== undefined;
+        if (!hasRouterSignal) return { available: false };
+
+        const lastFinalTextAt = Number(window.__browserRouterLastFinalTextAt || 0);
+        const lastToolCallAt = Number(window.__browserRouterLastToolCallAt || 0);
+        const lastToolResultAt = Number(window.__browserRouterLastToolResultAt || 0);
+        const latestToolActivityAt = Math.max(lastToolCallAt, lastToolResultAt);
+
+        return {
+          available: true,
+          sseActive: Number(capture?.active || 0),
+          messageStreamComplete: window.__browserRouterMessageStreamComplete === true,
+          messageCompleteObserved: window.__browserRouterMessageCompleteObserved === true,
+          lastFinalTextAt,
+          lastToolCallAt,
+          lastToolResultAt,
+          latestToolActivityAt,
+          postToolFinalText: lastFinalTextAt >= latestToolActivityAt,
+        };
+      },
+    });
+    return results?.[0]?.result || { available: false };
+  } catch {
+    return { available: false };
   }
 }
 
@@ -1502,6 +1543,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'approval:get-tab-state') {
     const tabId = message.tabId;
     return reply(Promise.all([getTabState(tabId), supportedTab(tabId)]).then(([state, tab]) => ({ state, supported: !!tab })));
+  }
+  if (message.type === 'approval:get-turn-signal') {
+    const tabId = sender.tab?.id;
+    if (!Number.isInteger(tabId)) return false;
+    return reply(readRepeatTurnSignal(tabId).then((signal) => ({ signal })));
   }
   if (message.type === 'approval:set-tab-state') {
     const tabId = message.tabId;

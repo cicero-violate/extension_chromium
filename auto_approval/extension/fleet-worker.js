@@ -2,7 +2,6 @@
   'use strict';
 
   const HEARTBEAT_MS = 10000;
-  const WATCHDOG_MS = 5000;
   const MONITOR_THROTTLE_MS = 500;
   const FALLBACK_SETTLE_MS = 30000;
   const START_TIMEOUT_MS = 20000;
@@ -10,7 +9,8 @@
 
   let registered = false;
   let heartbeatTimer = null;
-  let monitorTimer = null;
+  let monitorStartTimer = null;
+  let monitorSettleTimer = null;
   let monitorObserver = null;
   let monitorCheckRunning = false;
   let monitorCheckQueued = false;
@@ -274,9 +274,13 @@
   }
 
   function stopMonitor() {
-    if (monitorTimer !== null) {
-      clearInterval(monitorTimer);
-      monitorTimer = null;
+    if (monitorStartTimer !== null) {
+      clearTimeout(monitorStartTimer);
+      monitorStartTimer = null;
+    }
+    if (monitorSettleTimer !== null) {
+      clearTimeout(monitorSettleTimer);
+      monitorSettleTimer = null;
     }
     if (monitorObserver !== null) {
       monitorObserver.disconnect();
@@ -320,18 +324,38 @@
     });
   }
 
+  function scheduleMonitorSettleCheck() {
+    if (!active) return;
+    if (monitorSettleTimer !== null) clearTimeout(monitorSettleTimer);
+    monitorSettleTimer = setTimeout(() => {
+      monitorSettleTimer = null;
+      requestMonitorCheck();
+    }, FALLBACK_SETTLE_MS + 50);
+  }
+
   function startMonitor() {
     stopMonitor();
     const root = document.body || document.documentElement;
     if (root) {
-      monitorObserver = new MutationObserver((mutations) => { rememberAssistantNodeFromMutations(mutations); requestMonitorCheck(); });
+      monitorObserver = new MutationObserver((mutations) => {
+        rememberAssistantNodeFromMutations(mutations);
+        if (active?.textDirty) scheduleMonitorSettleCheck();
+        requestMonitorCheck();
+      });
       monitorObserver.observe(root, {
         subtree: true,
         childList: true,
         characterData: true,
+        attributes: true,
+        attributeFilter: ['disabled', 'aria-disabled', 'data-testid', 'aria-label'],
       });
     }
-    monitorTimer = setInterval(requestMonitorCheck, WATCHDOG_MS);
+
+    // One deadline for "response never started"; DOM activity drives all normal checks.
+    monitorStartTimer = setTimeout(() => {
+      monitorStartTimer = null;
+      requestMonitorCheck();
+    }, START_TIMEOUT_MS + 50);
     requestMonitorCheck();
   }
 
@@ -420,6 +444,13 @@
         active.lastText = text;
         active.responseChanged = currentFingerprint !== active.baselineFingerprint && text.trim().length > 0;
         active.explicitTerminal = active.responseChanged && hasFleetTerminalMarker(text);
+        if (active.responseChanged) {
+          if (monitorStartTimer !== null) {
+            clearTimeout(monitorStartTimer);
+            monitorStartTimer = null;
+          }
+          if (!active.explicitTerminal) scheduleMonitorSettleCheck();
+        }
       }
     }
 

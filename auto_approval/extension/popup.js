@@ -3,7 +3,7 @@
 const $ = (id) => document.getElementById(id);
 const els = {
   openControlPane: $('openControlPane'), workerScope: $('workerScope'), workerToggle: $('workerToggle'), workerRole: $('workerRole'),
-  scope: $('scope'), tabEnabled: $('tabEnabled'), features: $('features'), autoApprove: $('autoApprove'), autoScroll: $('autoScroll'), repeatToggle: $('repeatToggle'), repeatMode: $('repeatMode'), repeatCount: $('repeatCount'), repeatProgress: $('repeatProgress'), repeatRestartEnabled: $('repeatRestartEnabled'), repeatRestartMode: $('repeatRestartMode'), repeatMessage: $('repeatMessage'), saveRepeat: $('saveRepeat'), status: $('status'),
+  scope: $('scope'), tabEnabled: $('tabEnabled'), features: $('features'), autoApprove: $('autoApprove'), autoScroll: $('autoScroll'), repeatToggle: $('repeatToggle'), repeatMode: $('repeatMode'), repeatCount: $('repeatCount'), repeatProgress: $('repeatProgress'), repeatRestartEnabled: $('repeatRestartEnabled'), repeatMessage: $('repeatMessage'), saveRepeat: $('saveRepeat'), status: $('status'),
 };
 
 let tabId = null;
@@ -12,7 +12,7 @@ let worker = null;
 let approval = {
   enabled: false, autoApprove: true, autoScroll: true, repeatMessageEnabled: false, repeatMessage: '',
   repeatMessageMode: 'forever', repeatMessageCount: 1, repeatMessageSent: 0,
-  repeatRestartEnabled: false, repeatRestartMode: 'reload', repeatRestartPending: false, repeatBootstrapPending: false,
+  repeatRestartEnabled: false, repeatRestartMode: 'new_chat', repeatRestartPending: false, repeatBootstrapPending: false,
 };
 
 function send(type, payload = {}) {
@@ -67,10 +67,6 @@ function render() {
   const restartEnabled = approval.repeatRestartEnabled === true && mode === 'count';
   els.repeatRestartEnabled.checked = restartEnabled;
   els.repeatRestartEnabled.disabled = mode !== 'count';
-  if (document.activeElement !== els.repeatRestartMode) {
-    els.repeatRestartMode.value = approval.repeatRestartMode === 'new_chat' ? 'new_chat' : 'reload';
-  }
-  els.repeatRestartMode.disabled = !restartEnabled;
   const cycleState = approval.repeatRestartPending
     ? ' · waiting to restart after this turn'
     : (approval.repeatBootstrapPending ? ' · starting next batch' : '');
@@ -152,12 +148,8 @@ els.repeatMode.addEventListener('change', () => {
   els.repeatCount.disabled = !counted;
   els.repeatRestartEnabled.disabled = !counted;
   if (!counted) els.repeatRestartEnabled.checked = false;
-  els.repeatRestartMode.disabled = !counted || !els.repeatRestartEnabled.checked;
 });
 
-els.repeatRestartEnabled.addEventListener('change', () => {
-  els.repeatRestartMode.disabled = !els.repeatRestartEnabled.checked || els.repeatMode.value !== 'count';
-});
 
 els.saveRepeat.addEventListener('click', () => {
   const mode = els.repeatMode.value === 'count' ? 'count' : 'forever';
@@ -168,7 +160,7 @@ els.saveRepeat.addEventListener('click', () => {
     repeatMessageCount: count,
     repeatMessageSent: 0,
     repeatRestartEnabled: mode === 'count' && els.repeatRestartEnabled.checked,
-    repeatRestartMode: els.repeatRestartMode.value === 'new_chat' ? 'new_chat' : 'reload',
+    repeatRestartMode: 'new_chat',
     repeatRestartPending: false,
     repeatBootstrapPending: false,
   }, 'Repeat settings saved').catch((error) => setStatus(String(error), true));

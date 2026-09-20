@@ -1,14 +1,14 @@
 (() => {
   'use strict';
 
-  const POLL_MS = 5000;
   const APPROVAL_WAKE_THROTTLE_MS = 100;
   const HIGHLIGHT_ATTR = 'data-approval-hint-wasm';
   const CLICK_DEDUPE_MS = 5000;
   const REPEAT_COOLDOWN_MS = 5000;
   const ROUTER_TOOL_GRACE_MS = 30000;
-  const REPEAT_FALLBACK_SETTLE_MS = 30000;
+  const REPEAT_COMPLETION_SETTLE_MS = 1500;
   const STALE_STOP_ESCAPE_MS = 5000;
+  const COMPOSER_READY_TIMEOUT_MS = 20000;
   const SEND_READY_TIMEOUT_MS = 5000;
   let wasmExports = null;
   let wasmPromise = null;
@@ -22,18 +22,20 @@
   let repeatMessageCount = 1;
   let repeatMessageSent = 0;
   let repeatRestartEnabled = false;
-  let repeatRestartMode = 'reload';
+  let repeatRestartMode = 'new_chat';
   let repeatRestartPending = false;
   let repeatBootstrapPending = false;
   let wasStreaming = false;
   let repeatPending = false;
   let repeatAssistantFingerprint = '';
   let repeatAssistantChangedAt = 0;
+  let repeatTurnObservedAt = 0;
+  let repeatUiCompletionAt = 0;
   let repeatResponseObserved = false;
   let lastRepeatSent = 0;
-  let pollTimer = null;
-  let pollObserver = null;
-  let pollWakeTimer = null;
+  let eventObserver = null;
+  let wakeTimer = null;
+  let wakeAt = 0;
   let tickRunning = false;
   let tickQueued = false;
 
@@ -58,7 +60,7 @@
     repeatMessageCount = Math.max(1, Math.trunc(Number(state.repeatMessageCount) || 1));
     repeatMessageSent = Math.max(0, Math.trunc(Number(state.repeatMessageSent) || 0));
     repeatRestartEnabled = state.repeatRestartEnabled === true && repeatMessageMode === 'count';
-    repeatRestartMode = state.repeatRestartMode === 'new_chat' ? 'new_chat' : 'reload';
+    repeatRestartMode = 'new_chat';
     repeatRestartPending = state.repeatRestartPending === true && repeatRestartEnabled;
     repeatBootstrapPending = state.repeatBootstrapPending === true && repeatRestartEnabled;
     if (!repeatMessageEnabled) {
@@ -66,15 +68,17 @@
       repeatResponseObserved = false;
       repeatAssistantFingerprint = '';
       repeatAssistantChangedAt = 0;
+      repeatTurnObservedAt = 0;
+      repeatUiCompletionAt = 0;
     } else if (!wasRepeatEnabled) {
       resetRepeatObservation();
     }
 
     const hasWork = autoApprove || autoScroll || repeatMessageEnabled;
     if (tabEnabled && hasWork) {
-      startPolling();
+      startWatching();
     } else {
-      stopPolling();
+      stopWatching();
     }
   }
 
@@ -357,6 +361,8 @@
   function resetRepeatObservation() {
     repeatAssistantFingerprint = currentAssistantFingerprint();
     repeatAssistantChangedAt = 0;
+    repeatTurnObservedAt = 0;
+    repeatUiCompletionAt = 0;
     repeatResponseObserved = false;
   }
 
@@ -368,9 +374,71 @@
     }
     if (next === repeatAssistantFingerprint) return false;
     repeatAssistantFingerprint = next;
-    repeatAssistantChangedAt = Date.now();
+    const changedAt = Date.now();
+    repeatAssistantChangedAt = changedAt;
+    if (!repeatTurnObservedAt) repeatTurnObservedAt = changedAt;
     repeatResponseObserved = true;
     return true;
+  }
+
+  function observeUiCompletion(mutations) {
+    if (!repeatMessageEnabled) return;
+    for (const mutation of mutations) {
+      const candidates = [];
+      const target = mutation.target?.nodeType === Node.ELEMENT_NODE
+        ? mutation.target
+        : mutation.target?.parentElement;
+      if (target) candidates.push(target);
+      for (const node of mutation.addedNodes || []) {
+        if (node.nodeType === Node.ELEMENT_NODE) candidates.push(node);
+        else if (node.parentElement) candidates.push(node.parentElement);
+      }
+      for (const node of candidates) {
+        const live = node.closest?.('[aria-live], [role="status"]')
+          || node.querySelector?.('[aria-live], [role="status"]');
+        const text = (live?.innerText || live?.textContent || '').trim();
+        if (/response complete/i.test(text)) {
+          repeatUiCompletionAt = Date.now();
+          requestTick(0);
+          return;
+        }
+      }
+    }
+  }
+
+  async function repeatTurnComplete(now, streaming) {
+    if (!repeatResponseObserved || streaming || repeatAssistantChangedAt <= 0) return false;
+    const quietFor = now - repeatAssistantChangedAt;
+    if (quietFor < REPEAT_COMPLETION_SETTLE_MS) return false;
+
+    try {
+      const response = await runtimeMessage({ type: 'approval:get-turn-signal' });
+      const signal = response?.signal;
+      if (response?.ok && signal?.available) {
+        const freshnessFloor = Math.max(0, (repeatTurnObservedAt || repeatAssistantChangedAt) - 5000);
+        const latestSignalAt = Math.max(
+          Number(signal.lastFinalTextAt || 0),
+          Number(signal.lastToolCallAt || 0),
+          Number(signal.lastToolResultAt || 0),
+        );
+        const fresh = latestSignalAt >= freshnessFloor;
+        return fresh
+          && signal.sseActive === 0
+          && signal.messageStreamComplete === true
+          && signal.messageCompleteObserved === true
+          && signal.postToolFinalText === true;
+      }
+    } catch {
+      // Fall through to ChatGPT UI completion evidence.
+    }
+
+    if (repeatUiCompletionAt > 0
+      && repeatUiCompletionAt >= Math.max(0, (repeatTurnObservedAt || 0) - 5000)) {
+      return true;
+    }
+
+    // A quiet gap can occur between tool phases, so silence alone is not completion evidence.
+    return false;
   }
 
   function isStreaming() {
@@ -428,6 +496,33 @@
       });
   }
 
+  function waitForComposer(timeoutMs = COMPOSER_READY_TIMEOUT_MS) {
+    const immediate = findComposer();
+    if (immediate) return Promise.resolve(immediate);
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (editor) => {
+        if (settled) return;
+        settled = true;
+        observer.disconnect();
+        clearTimeout(timeoutId);
+        resolve(editor);
+      };
+      const observer = new MutationObserver(() => {
+        const editor = findComposer();
+        if (editor) finish(editor);
+      });
+      observer.observe(document.documentElement, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['id', 'contenteditable', 'data-id', 'data-placeholder'],
+      });
+      const timeoutId = setTimeout(() => finish(null), timeoutMs);
+    });
+  }
+
   function waitForSendButton(timeoutMs = SEND_READY_TIMEOUT_MS) {
     const immediate = findSendButton();
     if (immediate && enabledButton(immediate)) return Promise.resolve(immediate);
@@ -461,9 +556,9 @@
     if (!text) return false;
     if (repeatMessageMode === 'count' && repeatMessageSent >= repeatMessageCount) return false;
 
-    const editor = findComposer();
+    const editor = await waitForComposer();
     if (!editor) {
-      console.warn('[approval-hint-wasm] repeat message: no input found');
+      console.debug('[approval-hint-wasm] repeat message: composer not ready; will retry');
       return false;
     }
 
@@ -505,12 +600,37 @@
     if (!tabEnabled) return;
     try {
       if (repeatMessageEnabled) {
-        observeAssistantOutput();
+        const assistantChanged = observeAssistantOutput();
         const streaming = isStreaming();
-        if (wasStreaming && !streaming) repeatPending = true;
         wasStreaming = streaming;
 
         const now = Date.now();
+
+        if (assistantChanged) {
+          requestTick(REPEAT_COMPLETION_SETTLE_MS + 50);
+        }
+        if (repeatResponseObserved && repeatAssistantChangedAt > 0) {
+          const quietFor = now - repeatAssistantChangedAt;
+          const settleRemaining = REPEAT_COMPLETION_SETTLE_MS - quietFor;
+          if (settleRemaining > 0) requestTick(settleRemaining + 50);
+
+          if (streaming) {
+            const staleStopRemaining = STALE_STOP_ESCAPE_MS - quietFor;
+            if (staleStopRemaining > 0) requestTick(staleStopRemaining + 50);
+          }
+        }
+
+        if (repeatBootstrapPending && repeatRestartEnabled) {
+          const alreadyAtChatRoot = location.hostname === 'chatgpt.com'
+            && location.pathname === '/'
+            && !location.search
+            && !location.hash;
+          if (!alreadyAtChatRoot) {
+            console.info('[approval-hint-wasm] repeat bootstrap: forcing same tab to ChatGPT root');
+            location.replace('https://chatgpt.com/');
+            return;
+          }
+        }
 
         if (repeatBootstrapPending && !streaming && now - lastRepeatSent > REPEAT_COOLDOWN_MS) {
           const sent = await sendRepeatMessage();
@@ -533,12 +653,14 @@
           }
         }
 
-        if (!repeatPending
-          && repeatResponseObserved
-          && repeatAssistantChangedAt > 0
-          && now - repeatAssistantChangedAt >= REPEAT_FALLBACK_SETTLE_MS) {
+        if (!repeatPending && await repeatTurnComplete(now, streaming)) {
           repeatPending = true;
-          console.info('[approval-hint-wasm] repeat message: using settled-assistant fallback completion');
+          console.info('[approval-hint-wasm] repeat message: final turn completion observed');
+        }
+
+        if (repeatPending && !streaming) {
+          const cooldownRemaining = REPEAT_COOLDOWN_MS - (now - lastRepeatSent);
+          if (cooldownRemaining > 0) requestTick(cooldownRemaining + 10);
         }
 
         if (repeatPending && !streaming && now - lastRepeatSent > REPEAT_COOLDOWN_MS) {
@@ -590,7 +712,11 @@
         lastClick = { key: '', at: 0 };
         return;
       }
-      if (pos.scrolled || pos.blocked || !autoApprove) return;
+      if (pos.scrolled) {
+        requestTick(250);
+        return;
+      }
+      if (pos.blocked || !autoApprove) return;
       clickApprovalButton(pos);
     } catch (error) {
       console.debug('[approval-hint-wasm] tick failed', error);
@@ -598,15 +724,16 @@
   }
 
   function mutationTouchesTrackedUi(mutation) {
+    const selector = 'button, [data-message-author-role="assistant"], #prompt-textarea, [contenteditable="true"][data-id], [contenteditable="true"][data-placeholder]';
     const target = mutation.target?.nodeType === Node.ELEMENT_NODE
       ? mutation.target
       : mutation.target?.parentElement;
-    if (target?.closest?.('button, [data-message-author-role="assistant"]')) return true;
+    if (target?.closest?.(selector)) return true;
     return [...mutation.addedNodes].some((node) =>
       node.nodeType === Node.ELEMENT_NODE
       && (
-        node.matches?.('button, [data-message-author-role="assistant"]')
-        || node.querySelector?.('button, [data-message-author-role="assistant"]')
+        node.matches?.(selector)
+        || node.querySelector?.(selector)
       )
     );
   }
@@ -628,21 +755,45 @@
   }
 
   function requestTick(delayMs = APPROVAL_WAKE_THROTTLE_MS) {
-    if (!tabEnabled || pollWakeTimer !== null) return;
-    pollWakeTimer = setTimeout(() => {
-      pollWakeTimer = null;
+    if (!tabEnabled) return;
+    const delay = Math.max(0, Number(delayMs) || 0);
+    const targetAt = Date.now() + delay;
+
+    // Coalesce wakeups. If a more urgent event arrives, pull the existing
+    // one-shot timer earlier instead of adding another timer.
+    if (wakeTimer !== null) {
+      if (targetAt >= wakeAt) return;
+      clearTimeout(wakeTimer);
+      wakeTimer = null;
+      wakeAt = 0;
+    }
+
+    wakeAt = targetAt;
+    wakeTimer = setTimeout(() => {
+      wakeTimer = null;
+      wakeAt = 0;
       runTick();
-    }, Math.max(0, delayMs));
+    }, delay);
   }
 
-  function startPolling() {
-    if (pollTimer !== null) return;
+  function onViewportEvent() {
+    requestTick();
+  }
+
+  function startWatching() {
+    if (eventObserver !== null) {
+      requestTick(0);
+      return;
+    }
+
     runTick();
-    if (pollObserver === null && document.documentElement) {
-      pollObserver = new MutationObserver((mutations) => {
+
+    if (document.documentElement) {
+      eventObserver = new MutationObserver((mutations) => {
+        observeUiCompletion(mutations);
         if (mutations.some(mutationTouchesTrackedUi)) requestTick();
       });
-      pollObserver.observe(document.documentElement, {
+      eventObserver.observe(document.documentElement, {
         subtree: true,
         childList: true,
         characterData: true,
@@ -650,22 +801,28 @@
         attributeFilter: ["disabled", "aria-disabled"],
       });
     }
-    pollTimer = setInterval(() => requestTick(0), POLL_MS);
+
+    // These are event-driven recovery points for layout/SPA lifecycle changes.
+    window.addEventListener('scroll', onViewportEvent, { passive: true, capture: true });
+    window.addEventListener('resize', onViewportEvent, { passive: true });
+    window.addEventListener('pageshow', onViewportEvent);
   }
 
-  function stopPolling() {
-    if (pollTimer !== null) {
-      clearInterval(pollTimer);
-      pollTimer = null;
+  function stopWatching() {
+    if (eventObserver !== null) {
+      eventObserver.disconnect();
+      eventObserver = null;
     }
-    if (pollObserver !== null) {
-      pollObserver.disconnect();
-      pollObserver = null;
+    if (wakeTimer !== null) {
+      clearTimeout(wakeTimer);
+      wakeTimer = null;
+      wakeAt = 0;
     }
-    if (pollWakeTimer !== null) {
-      clearTimeout(pollWakeTimer);
-      pollWakeTimer = null;
-    }
+
+    window.removeEventListener('scroll', onViewportEvent, { capture: true });
+    window.removeEventListener('resize', onViewportEvent);
+    window.removeEventListener('pageshow', onViewportEvent);
+
     tickQueued = false;
     lastClick = { key: "", at: 0 };
     wasStreaming = false;
@@ -674,6 +831,8 @@
     repeatBootstrapPending = false;
     repeatAssistantFingerprint = '';
     repeatAssistantChangedAt = 0;
+    repeatTurnObservedAt = 0;
+    repeatUiCompletionAt = 0;
     repeatResponseObserved = false;
     lastRepeatSent = 0;
     clearHighlights();
