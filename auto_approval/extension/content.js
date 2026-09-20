@@ -7,7 +7,7 @@
   const REPEAT_COOLDOWN_MS = 5000;
   const ROUTER_TOOL_GRACE_MS = 30000;
   const REPEAT_COMPLETION_SETTLE_MS = 1500;
-  const STALE_STOP_ESCAPE_MS = 5000;
+  const FINAL_IDLE_STABILITY_MS = 4000;
   const COMPOSER_READY_TIMEOUT_MS = 20000;
   const SEND_READY_TIMEOUT_MS = 5000;
   let wasmExports = null;
@@ -32,6 +32,7 @@
   let repeatTurnObservedAt = 0;
   let repeatUiCompletionAt = 0;
   let repeatResponseObserved = false;
+  let repeatIdleSince = 0;
   let lastRepeatSent = 0;
   let eventObserver = null;
   let wakeTimer = null;
@@ -70,6 +71,7 @@
       repeatAssistantChangedAt = 0;
       repeatTurnObservedAt = 0;
       repeatUiCompletionAt = 0;
+      repeatIdleSince = 0;
     } else if (!wasRepeatEnabled) {
       resetRepeatObservation();
     }
@@ -364,6 +366,7 @@
     repeatTurnObservedAt = 0;
     repeatUiCompletionAt = 0;
     repeatResponseObserved = false;
+    repeatIdleSince = 0;
   }
 
   function observeAssistantOutput() {
@@ -406,8 +409,25 @@
     }
   }
 
+  function latestAssistantTurn() {
+    const assistants = document.querySelectorAll('[data-message-author-role="assistant"]');
+    const latest = assistants[assistants.length - 1];
+    if (!latest) return null;
+    return latest.closest('article, [data-testid*="conversation-turn"]')
+      || latest.parentElement;
+  }
+
+  function hasNativeFinalTurnActions() {
+    const turn = latestAssistantTurn();
+    if (!turn) return false;
+    return !!turn.querySelector(
+      '[data-testid="copy-turn-action-button"], [data-testid="feedback-turn-action-button"]'
+    );
+  }
+
   async function repeatTurnComplete(now, streaming) {
     if (!repeatResponseObserved || streaming || repeatAssistantChangedAt <= 0) return false;
+    if (repeatIdleSince <= 0 || now - repeatIdleSince < FINAL_IDLE_STABILITY_MS) return false;
     const quietFor = now - repeatAssistantChangedAt;
     if (quietFor < REPEAT_COMPLETION_SETTLE_MS) return false;
 
@@ -437,13 +457,16 @@
       return true;
     }
 
+    // Native ChatGPT completion signal. The final response action toolbar is
+    // attached only after the assistant turn is complete; tool-call/tool-result
+    // intermediate phases do not expose these turn actions.
+    if (hasNativeFinalTurnActions()) return true;
+
     // A quiet gap can occur between tool phases, so silence alone is not completion evidence.
     return false;
   }
 
   function isStreaming() {
-    // Router state is advisory. Missing/stale completion flags must never pin the tab
-    // in a permanent "streaming" state. Only positive activity keeps the turn busy.
     if ((window.__browserRouterSseCapture?.active || 0) > 0) return true;
 
     const lastFinalText = Number(window.__browserRouterLastFinalTextAt || 0);
@@ -455,22 +478,15 @@
       return true;
     }
 
+    // An active composer Stop control is authoritative. Never age it out:
+    // long-running tool calls can be quiet while the same turn is still active.
     const stopButton = document.querySelector(
-      '[data-testid="stop-button"], #composer-submit-button[data-testid*="stop" i], button[data-testid*="stop" i], button[aria-label*="stop" i]'
+      '#composer-submit-button[data-testid="stop-button"], '
+      + '#composer-submit-button[data-testid*="stop" i], '
+      + '#composer-submit-button[aria-label*="stop" i], '
+      + 'button[data-testid="stop-button"]'
     );
-    if (!stopButton || !enabledButton(stopButton)) return false;
-
-    // ChatGPT can leave a stale Stop control visible after final assistant text.
-    // Do not let that stale DOM state veto repeat completion forever. This only
-    // releases our local busy classification; sendRepeatMessage still requires
-    // a genuine enabled Send control before it can submit anything.
-    const assistantQuietFor = repeatAssistantChangedAt > 0
-      ? Date.now() - repeatAssistantChangedAt
-      : 0;
-    if (repeatResponseObserved && assistantQuietFor >= STALE_STOP_ESCAPE_MS) {
-      return false;
-    }
-    return true;
+    return !!stopButton && enabledButton(stopButton);
   }
 
   function findComposer() {
@@ -555,6 +571,10 @@
     const text = repeatMessage.trim();
     if (!text) return false;
     if (repeatMessageMode === 'count' && repeatMessageSent >= repeatMessageCount) return false;
+    if (isStreaming()) {
+      console.debug('[approval-hint-wasm] repeat message: turn still active; refusing to send');
+      return false;
+    }
 
     const editor = await waitForComposer();
     if (!editor) {
@@ -590,6 +610,10 @@
       console.warn('[approval-hint-wasm] repeat message: send button not ready; will retry');
       return false;
     }
+    if (isStreaming()) {
+      console.debug('[approval-hint-wasm] repeat message: turn resumed before send; refusing to submit');
+      return false;
+    }
 
     sendBtn.click();
     console.info('[approval-hint-wasm] sent repeat message');
@@ -606,6 +630,15 @@
 
         const now = Date.now();
 
+        if (streaming) {
+          repeatIdleSince = 0;
+          repeatPending = false;
+        } else {
+          if (repeatIdleSince <= 0) repeatIdleSince = now;
+          const idleRemaining = FINAL_IDLE_STABILITY_MS - (now - repeatIdleSince);
+          if (idleRemaining > 0) requestTick(idleRemaining + 50);
+        }
+
         if (assistantChanged) {
           requestTick(REPEAT_COMPLETION_SETTLE_MS + 50);
         }
@@ -613,11 +646,6 @@
           const quietFor = now - repeatAssistantChangedAt;
           const settleRemaining = REPEAT_COMPLETION_SETTLE_MS - quietFor;
           if (settleRemaining > 0) requestTick(settleRemaining + 50);
-
-          if (streaming) {
-            const staleStopRemaining = STALE_STOP_ESCAPE_MS - quietFor;
-            if (staleStopRemaining > 0) requestTick(staleStopRemaining + 50);
-          }
         }
 
         if (repeatBootstrapPending && repeatRestartEnabled) {
@@ -834,6 +862,7 @@
     repeatTurnObservedAt = 0;
     repeatUiCompletionAt = 0;
     repeatResponseObserved = false;
+    repeatIdleSince = 0;
     lastRepeatSent = 0;
     clearHighlights();
   }
