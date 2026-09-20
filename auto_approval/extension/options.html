@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Approval Assistant Settings</title>
+    <style>
+      body { font: 14px/1.45 system-ui, sans-serif; margin: 24px; max-width: 560px; color: #111827; }
+      .controls { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+      button { border: 0; border-radius: 8px; cursor: pointer; font: inherit; font-weight: 700; padding: 10px 14px; }
+      button.enabled { background: #166534; color: #fff; }
+      button.disabled { background: #991b1b; color: #fff; }
+      p { color: #4b5563; }
+      .status { margin-top: 12px; color: #166534; }
+      .repeat-section { margin-top: 20px; border-top: 1px solid #e5e7eb; padding-top: 20px; }
+      .repeat-section h2 { font-size: 15px; margin: 0 0 10px; }
+      .repeat-section textarea {
+        width: 100%;
+        box-sizing: border-box;
+        min-height: 80px;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        font: inherit;
+        padding: 8px 10px;
+        resize: vertical;
+        margin-top: 8px;
+      }
+      .repeat-section textarea:focus { outline: 2px solid #166534; border-color: transparent; }
+      .repeat-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      #saveRepeat { background: #1d4ed8; color: #fff; }
+      #saveRepeat:hover { background: #1e40af; }
+    </style>
+  </head>
+  <body>
+    <h1>Approval Assistant</h1>
+    <div class="controls">
+      <button id="autoApprove" type="button">Loading…</button>
+      <button id="autoScroll" type="button">Loading…</button>
+    </div>
+    <p>
+      Auto approve clicks likely approval buttons on ChatGPT approval dialogs. Auto scroll brings likely approval controls into view without clicking them.
+    </p>
+
+    <div class="repeat-section">
+      <h2>Repeat Message</h2>
+      <p style="margin:0 0 8px">Send this message automatically each time the model finishes responding.</p>
+      <div class="repeat-row">
+        <button id="repeatToggle" type="button">Loading…</button>
+        <button id="saveRepeat" type="button">Save message</button>
+      </div>
+      <textarea id="repeatMessage" placeholder="Enter the message to repeat…"></textarea>
+    </div>
+
+    <div id="status" class="status"></div>
+    <script src="options.js"></script>
+  </body>
+</html>

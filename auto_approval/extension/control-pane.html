@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Model Fleet Control</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg:#080b10; --panel:#0e131b; --panel2:#121925; --border:#222c3b; --strong:#344157;
+      --text:#edf2f7; --muted:#8f9bad; --green:#5dd39e; --amber:#f1bd62; --red:#f2777a;
+      --blue:#74a8ff; --violet:#a98cff; --cyan:#62d5e8; --radius:12px;
+    }
+    *{box-sizing:border-box} html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text)}
+    body{font:13px/1.45 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    button,input,textarea,select{font:inherit;color:inherit} button{cursor:pointer}
+    .app{min-height:100vh;display:grid;grid-template-rows:auto auto 1fr}
+    .topbar{min-height:62px;display:flex;align-items:center;gap:14px;padding:10px 16px;border-bottom:1px solid var(--border);background:#0a0e14;position:sticky;top:0;z-index:5}
+    .brand{display:flex;align-items:center;gap:10px;min-width:245px}.mark{width:31px;height:31px;border:1px solid var(--strong);border-radius:8px;display:grid;place-items:center;background:#111927;font-weight:900}
+    .brand-title{font-weight:780}.sub{font-size:11px;color:var(--muted)}.live{border:1px solid rgba(93,211,158,.35);background:rgba(93,211,158,.08);color:var(--green);padding:4px 8px;border-radius:999px;font-size:11px;font-weight:800}
+    .spacer{flex:1}.health{color:var(--muted);display:flex;align-items:center;gap:7px}.dot{width:8px;height:8px;border-radius:50%;background:var(--green)}
+    .action{border:1px solid var(--strong);background:var(--panel2);padding:7px 10px;border-radius:8px}.danger{border-color:#673336;color:#ff9b9d;background:#1d1012}
+    .goalbar{display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:11px 16px;border-bottom:1px solid var(--border);background:#0b1017}
+    .goal-wrap{display:flex;gap:8px;align-items:center}.goal-wrap input{min-width:260px;flex:1}.metric{padding:4px 10px;border-left:1px solid var(--border);min-width:105px}.metric strong{display:block;font-size:16px}.metric span{font-size:11px;color:var(--muted)}
+    input,textarea,select{border:1px solid var(--strong);background:#0d141d;border-radius:8px;padding:8px 10px;outline:none} textarea{resize:vertical;min-height:74px;width:100%} input:focus,textarea:focus,select:focus{border-color:#536d94}
+    .workspace{display:grid;grid-template-columns:250px minmax(480px,1.35fr) minmax(340px,.9fr);gap:12px;padding:12px;align-items:start}
+    .column{display:grid;gap:12px}.panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}.head{min-height:41px;padding:9px 11px;border-bottom:1px solid var(--border);background:#101721;display:flex;align-items:center;justify-content:space-between;gap:10px}.title{font-size:12px;font-weight:780;text-transform:uppercase;letter-spacing:.07em}.meta{font-size:11px;color:var(--muted)}.body{padding:11px}
+    .row{display:flex;gap:8px;align-items:center}.stack{display:grid;gap:8px}.grow{flex:1}.small{font-size:11px;color:var(--muted)}.button{border:1px solid var(--strong);background:#182232;border-radius:7px;padding:7px 9px}.primary{border-color:#3d5273;background:#172235}.good{border-color:#315d4c;color:#9be3c3;background:#102019}
+    .policy{padding:9px 0;border-bottom:1px solid #1a2230}.policy:last-child{border-bottom:0}.policy-top{display:flex;justify-content:space-between}.value{color:var(--cyan);font-variant-numeric:tabular-nums}input[type=range]{width:100%;padding:0;margin-top:7px;accent-color:var(--blue)}
+    .task,.worker,.message,.exception{border:1px solid var(--border);border-radius:9px;background:#0c121a;padding:9px;margin-bottom:7px}.task:last-child,.worker:last-child,.message:last-child{margin-bottom:0}.topline{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}.name{font-weight:700}.pill{font-size:10px;font-weight:800;letter-spacing:.05em;padding:3px 6px;border-radius:999px;border:1px solid var(--strong)}
+    .pending{color:#aeb8c5}.running{color:var(--blue);border-color:rgba(116,168,255,.35);background:rgba(116,168,255,.08)}.done{color:var(--green);border-color:rgba(93,211,158,.35);background:rgba(93,211,158,.08)}.blocked{color:var(--red);border-color:rgba(242,119,122,.35);background:rgba(242,119,122,.08)}
+    .task-result,.message-body{white-space:pre-wrap;color:#c6cfdb;margin-top:6px;max-height:110px;overflow:auto}.worker-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.worker{margin:0}.worker-actions{display:flex;gap:5px;margin-top:7px;flex-wrap:wrap}.mini{border:1px solid var(--strong);background:#161f2d;border-radius:6px;padding:4px 6px;font-size:11px}.role{color:var(--violet);font-size:11px}.caps{color:var(--muted);font-size:10px;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .invariant{display:grid;grid-template-columns:18px 1fr auto;gap:7px;padding:8px 0;border-bottom:1px solid #1a2230;align-items:center}.invariant:last-child{border-bottom:0}.ok{color:var(--green)}.warn{color:var(--amber)}.bad{color:var(--red)}
+    .journal{max-height:290px;overflow:auto}.event{display:grid;grid-template-columns:72px 1fr;gap:7px;padding:5px 0;border-bottom:1px solid #151d29;font-size:11px}.event-time{color:#657386;font-variant-numeric:tabular-nums}.event-text{color:#c5cfdb}.operator{border-color:#3e375d;background:#12101c}.toolbar{display:flex;gap:6px;flex-wrap:wrap}.form-grid{display:grid;grid-template-columns:1fr 150px 90px;gap:7px}.statusline{min-height:18px;color:var(--green);font-size:11px;margin-top:6px}
+    .empty{color:var(--muted);padding:8px 0}.exception{border-color:#493c22;background:#17140d}.exception strong{color:var(--amber)}
+    @media(max-width:1080px){.workspace{grid-template-columns:230px 1fr}.right{grid-column:1/-1;grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media(max-width:760px){.workspace{grid-template-columns:1fr}.right{grid-template-columns:1fr}.worker-grid{grid-template-columns:1fr}.goalbar{grid-template-columns:1fr 1fr}.goal-wrap{grid-column:1/-1}.health{display:none}.form-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><div class="mark">F</div><div><div class="brand-title">Model Fleet Control</div><div class="sub">Human governance plane · extension-local</div></div></div>
+    <span class="live">LIVE LOCAL</span>
+    <div class="spacer"></div>
+    <div class="health"><span class="dot" id="healthDot"></span><span id="healthText">Loading</span></div>
+    <button class="action" id="pauseAll">Pause dispatch</button>
+    <button class="action danger" id="killAll">Kill authority</button>
+  </header>
+
+  <section class="goalbar">
+    <div class="goal-wrap"><input id="goalInput" placeholder="Set the fleet's current goal"/><button class="button primary" id="saveGoal">Save goal</button></div>
+    <div class="metric"><strong id="workerMetric">0 / 0</strong><span>workers active</span></div>
+    <div class="metric"><strong id="taskMetric">0</strong><span>tasks runnable</span></div>
+    <div class="metric"><strong id="messageMetric">0</strong><span>semantic messages</span></div>
+  </section>
+
+  <main class="workspace">
+    <div class="column left">
+      <section class="panel"><div class="head"><div class="title">Fleet authority</div><div class="meta" id="generation">gen —</div></div><div class="body">
+        <div class="toolbar"><button class="button good" id="registerAll">Register all ChatGPT tabs</button><button class="button" id="refresh">Refresh</button></div>
+        <div class="statusline" id="status"></div>
+      </div></section>
+
+      <section class="panel"><div class="head"><div class="title">Execution policy</div><div class="meta">machine enforced</div></div><div class="body">
+        <div class="policy"><div class="policy-top"><span>Max concurrency</span><span class="value" id="concurrencyValue">8</span></div><input id="concurrency" type="range" min="1" max="32" value="8"/></div>
+        <div class="policy"><div class="policy-top"><span>Authority</span><span class="value" id="authorityValue">ON</span></div><div class="small">Kill revokes new dispatch and best-effort stops fleet-owned generations.</div></div>
+        <div class="policy"><div class="policy-top"><span>Worker windows</span><span class="value">PERSISTENT LIVE</span></div><div class="small">Each worker keeps one loaded ChatGPT tab in its own Chromium window. There is no companion Model Fleet/sleep tab and no fleet-managed discard/reload cycle. Eligible dedicated worker windows dispatch immediately and independently.</div></div>
+        <div class="policy"><div class="policy-top"><span>Semantic bus</span><span class="value">NATURAL LANGUAGE</span></div><div class="small">Routing envelope is typed; message body is prose.</div></div>
+        <div class="policy"><div class="policy-top"><span>Tool capability</span><span class="value">SESSION-BOUND</span></div><div class="small">Workers may use tools actually exposed by their ChatGPT session, including chatgpt-mcp-connector when connected.</div></div>
+      </div></section>
+
+      <section class="panel"><div class="head"><div class="title">System invariants</div><div class="meta">derived</div></div><div class="body" id="invariants"></div></section>
+      <section class="panel"><div class="head"><div class="title">Exceptions</div><div class="meta" id="exceptionCount">0</div></div><div class="body" id="exceptions"></div></section>
+    </div>
+
+    <div class="column center">
+      <section class="panel"><div class="head"><div class="title">Create task</div><div class="meta">scheduler input</div></div><div class="body stack">
+        <div class="form-grid"><input id="taskTitle" placeholder="Task title"/><select id="taskRole"><option value="generalist">generalist</option><option value="research">research</option><option value="implementation">implementation</option><option value="review">review</option><option value="test">test</option></select><input id="taskPriority" type="number" min="-100" max="100" value="0" title="priority"/></div>
+        <textarea id="taskPrompt" placeholder="Natural-language assignment. The selected worker may use its available ChatGPT tools."></textarea>
+        <div class="row"><input class="grow" id="taskDeps" placeholder="Dependencies, e.g. T-1,T-2"/><button class="button primary" id="createTask">Queue task</button></div>
+      </div></section>
+
+      <section class="panel"><div class="head"><div class="title">Task graph</div><div class="meta" id="taskCount">0 tasks</div></div><div class="body" id="tasks"></div></section>
+      <section class="panel"><div class="head"><div class="title">Workers</div><div class="meta" id="workerCount">0 registered</div></div><div class="body"><div class="worker-grid" id="workers"></div></div></section>
+    </div>
+
+    <div class="column right">
+      <section class="panel"><div class="head"><div class="title">Natural-language bus</div><div class="meta">operator → worker</div></div><div class="body stack">
+        <select id="messageTarget"><option value="">Select worker</option></select>
+        <textarea id="messageBody" placeholder="Send a natural-language message to one worker. It will be delivered only when that worker is idle."></textarea>
+        <button class="button primary" id="sendMessage">Send message</button>
+      </div></section>
+
+      <section class="panel"><div class="head"><div class="title">Operator inbox</div><div class="meta" id="inboxCount">0</div></div><div class="body" id="inbox"></div></section>
+      <section class="panel"><div class="head"><div class="title">Semantic traffic</div><div class="meta" id="trafficCount">0</div></div><div class="body" id="traffic"></div></section>
+      <section class="panel"><div class="head"><div class="title">Journal</div><div class="meta">bounded</div></div><div class="body journal" id="journal"></div></section>
+    </div>
+  </main>
+</div>
+<script src="control-pane.js"></script>
+</body>
+</html>

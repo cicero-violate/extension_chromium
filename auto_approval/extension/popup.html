@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Model Fleet</title>
+  <style>
+    :root{color-scheme:dark}*{box-sizing:border-box}body{font:13px/1.4 system-ui,sans-serif;margin:0;width:330px;background:#0b1017;color:#edf2f7}
+    header{padding:13px 14px 10px;border-bottom:1px solid #222c3b}.title{font-weight:800;font-size:16px}.sub{font-size:11px;color:#8f9bad;margin-top:2px}
+    main{padding:12px 14px;display:grid;gap:12px}.section{border:1px solid #222c3b;border-radius:10px;background:#0e131b;overflow:hidden}.head{padding:8px 10px;background:#101721;border-bottom:1px solid #222c3b;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}.body{padding:10px;display:grid;gap:7px}
+    button,input,select,textarea{font:inherit;color:inherit;border:1px solid #344157;background:#172235;border-radius:7px;padding:8px 9px;cursor:pointer;text-align:left}.enabled{border-color:#315d4c;background:#102019;color:#9be3c3}.disabled{border-color:#653537;background:#1b1012;color:#ff9b9d}.secondary{background:#151d29}.primary{border-color:#405a81;background:#16243a}.row{display:flex;gap:7px}.row>*{flex:1}.scope{color:#8f9bad;font-size:11px}.unsupported{color:#ff9b9d}.status{min-height:17px;color:#5dd39e;font-size:11px}input,select,textarea{width:100%}textarea{min-height:54px;resize:vertical;background:#0d141d;border:1px solid #344157;border-radius:7px;padding:7px;color:#edf2f7}
+  </style>
+</head>
+<body>
+<header><div class="title">Model Fleet</div><div class="sub">Current-tab worker + approval capability</div></header>
+<main>
+  <button id="openControlPane" class="primary" type="button">Open Fleet Control Pane</button>
+
+  <section class="section">
+    <div class="head">Worker</div>
+    <div class="body">
+      <div id="workerScope" class="scope">Loading current tab…</div>
+      <button id="workerToggle" type="button">Loading…</button>
+      <select id="workerRole">
+        <option value="generalist">generalist</option><option value="research">research</option><option value="implementation">implementation</option><option value="review">review</option><option value="test">test</option>
+      </select>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="head">Approval capability · this tab only</div>
+    <div class="body">
+      <div id="scope" class="scope">Loading…</div>
+      <button id="tabEnabled" type="button">Loading…</button>
+      <div id="features">
+        <div class="row"><button id="autoApprove" type="button">Loading…</button><button id="autoScroll" type="button">Loading…</button></div>
+        <button id="repeatToggle" type="button">Loading…</button>
+        <div class="row">
+          <select id="repeatMode" aria-label="Repeat mode">
+            <option value="forever">Forever</option>
+            <option value="count">Number of times</option>
+          </select>
+          <input id="repeatCount" type="number" min="1" max="1000000" step="1" value="1" aria-label="Repeat count" />
+        </div>
+        <div id="repeatProgress" class="scope"></div>
+        <textarea id="repeatMessage" placeholder="Repeat message for this tab"></textarea>
+        <button id="saveRepeat" class="secondary" type="button">Save repeat settings</button>
+      </div>
+    </div>
+  </section>
+  <div id="status" class="status"></div>
+</main>
+<script src="popup.js"></script>
+</body>
+</html>
