@@ -23,6 +23,10 @@ const DEFAULT_TAB_STATE = Object.freeze({
   repeatMessageMode: 'forever',
   repeatMessageCount: 1,
   repeatMessageSent: 0,
+  repeatRestartEnabled: false,
+  repeatRestartMode: 'reload',
+  repeatRestartPending: false,
+  repeatBootstrapPending: false,
 });
 
 const DEFAULT_POLICY = Object.freeze({
@@ -59,16 +63,28 @@ function normalizeTabState(value = {}) {
   const repeatMessageMode = value.repeatMessageMode === 'count' ? 'count' : 'forever';
   const repeatMessageCount = Math.max(1, Math.min(1000000, Math.trunc(Number(value.repeatMessageCount) || 1)));
   const repeatMessageSent = Math.max(0, Math.trunc(Number(value.repeatMessageSent) || 0));
+  const repeatRestartEnabled = value.repeatRestartEnabled === true && repeatMessageMode === 'count';
+  const repeatRestartMode = value.repeatRestartMode === 'new_chat' ? 'new_chat' : 'reload';
   const repeatLimitReached = repeatMessageMode === 'count' && repeatMessageSent >= repeatMessageCount;
+  const repeatRestartPending = repeatRestartEnabled
+    && repeatLimitReached
+    && value.repeatRestartPending === true;
+  const repeatBootstrapPending = repeatRestartEnabled
+    && value.repeatBootstrapPending === true
+    && !repeatLimitReached;
   return {
     enabled: value.enabled === true,
     autoApprove: value.autoApprove !== false,
     autoScroll: value.autoScroll !== false,
-    repeatMessageEnabled: value.repeatMessageEnabled === true && !repeatLimitReached,
+    repeatMessageEnabled: value.repeatMessageEnabled === true && (!repeatLimitReached || repeatRestartPending),
     repeatMessage: typeof value.repeatMessage === 'string' ? value.repeatMessage : '',
     repeatMessageMode,
     repeatMessageCount,
     repeatMessageSent,
+    repeatRestartEnabled,
+    repeatRestartMode,
+    repeatRestartPending,
+    repeatBootstrapPending,
   };
 }
 
@@ -100,10 +116,45 @@ async function recordRepeatMessageSent(tabId) {
   const repeatMessageSent = current.repeatMessageSent + 1;
   const repeatLimitReached = current.repeatMessageMode === 'count'
     && repeatMessageSent >= current.repeatMessageCount;
+  const repeatRestartPending = repeatLimitReached && current.repeatRestartEnabled;
   return setTabState(tabId, {
     repeatMessageSent,
-    repeatMessageEnabled: repeatLimitReached ? false : current.repeatMessageEnabled,
+    repeatBootstrapPending: false,
+    repeatRestartPending,
+    repeatMessageEnabled: repeatLimitReached && !repeatRestartPending
+      ? false
+      : current.repeatMessageEnabled,
   });
+}
+
+async function restartRepeatCycle(tabId) {
+  if (!Number.isInteger(tabId)) throw new Error('invalid tab id');
+  const current = await getTabState(tabId);
+  if (!current.repeatMessageEnabled
+    || !current.repeatRestartEnabled
+    || !current.repeatRestartPending
+    || current.repeatMessageMode !== 'count'
+    || current.repeatMessageSent < current.repeatMessageCount) {
+    return { restarted: false, state: current };
+  }
+
+  const key = tabStateKey(tabId);
+  const next = normalizeTabState({
+    ...current,
+    repeatMessageSent: 0,
+    repeatRestartPending: false,
+    repeatBootstrapPending: true,
+    repeatMessageEnabled: true,
+  });
+  await chrome.storage.session.set({ [key]: next });
+  await updateBadge(tabId, next);
+
+  if (current.repeatRestartMode === 'new_chat') {
+    await chrome.tabs.update(tabId, { url: 'https://chatgpt.com/' });
+  } else {
+    await chrome.tabs.reload(tabId);
+  }
+  return { restarted: true, state: next, mode: current.repeatRestartMode };
 }
 
 function freshFleetState() {
@@ -1460,6 +1511,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const tabId = sender.tab?.id;
     if (!Number.isInteger(tabId)) return false;
     return reply(recordRepeatMessageSent(tabId).then((state) => ({ state })));
+  }
+  if (message.type === 'approval:restart-repeat-cycle') {
+    const tabId = sender.tab?.id;
+    if (!Number.isInteger(tabId)) return false;
+    return reply(restartRepeatCycle(tabId));
   }
 
   if (message.type === 'fleet:get-snapshot') {

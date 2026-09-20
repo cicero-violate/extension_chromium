@@ -21,6 +21,10 @@
   let repeatMessageMode = 'forever';
   let repeatMessageCount = 1;
   let repeatMessageSent = 0;
+  let repeatRestartEnabled = false;
+  let repeatRestartMode = 'reload';
+  let repeatRestartPending = false;
+  let repeatBootstrapPending = false;
   let wasStreaming = false;
   let repeatPending = false;
   let repeatAssistantFingerprint = '';
@@ -53,6 +57,10 @@
     repeatMessageMode = state.repeatMessageMode === 'count' ? 'count' : 'forever';
     repeatMessageCount = Math.max(1, Math.trunc(Number(state.repeatMessageCount) || 1));
     repeatMessageSent = Math.max(0, Math.trunc(Number(state.repeatMessageSent) || 0));
+    repeatRestartEnabled = state.repeatRestartEnabled === true && repeatMessageMode === 'count';
+    repeatRestartMode = state.repeatRestartMode === 'new_chat' ? 'new_chat' : 'reload';
+    repeatRestartPending = state.repeatRestartPending === true && repeatRestartEnabled;
+    repeatBootstrapPending = state.repeatBootstrapPending === true && repeatRestartEnabled;
     if (!repeatMessageEnabled) {
       repeatPending = false;
       repeatResponseObserved = false;
@@ -503,6 +511,28 @@
         wasStreaming = streaming;
 
         const now = Date.now();
+
+        if (repeatBootstrapPending && !streaming && now - lastRepeatSent > REPEAT_COOLDOWN_MS) {
+          const sent = await sendRepeatMessage();
+          if (sent) {
+            lastRepeatSent = Date.now();
+            repeatPending = false;
+            repeatMessageSent += 1;
+            repeatBootstrapPending = false;
+            if (repeatMessageMode === 'count' && repeatMessageSent >= repeatMessageCount) {
+              if (repeatRestartEnabled) repeatRestartPending = true;
+              else repeatMessageEnabled = false;
+            }
+            resetRepeatObservation();
+            try {
+              const response = await runtimeMessage({ type: 'approval:repeat-sent' });
+              if (response?.ok && response.state) applyTabState(response.state);
+            } catch (error) {
+              console.warn('[approval-hint-wasm] repeat count update failed', error);
+            }
+          }
+        }
+
         if (!repeatPending
           && repeatResponseObserved
           && repeatAssistantChangedAt > 0
@@ -512,13 +542,33 @@
         }
 
         if (repeatPending && !streaming && now - lastRepeatSent > REPEAT_COOLDOWN_MS) {
+          if (repeatRestartPending) {
+            repeatPending = false;
+            try {
+              const response = await runtimeMessage({ type: 'approval:restart-repeat-cycle' });
+              if (!response?.ok || !response.restarted) {
+                repeatPending = true;
+                console.warn('[approval-hint-wasm] repeat cycle restart was not accepted');
+              }
+            } catch (error) {
+              repeatPending = true;
+              console.warn('[approval-hint-wasm] repeat cycle restart failed', error);
+            }
+            return;
+          }
+
           const sent = await sendRepeatMessage();
           if (sent) {
             lastRepeatSent = Date.now();
             repeatPending = false;
             repeatMessageSent += 1;
+            repeatBootstrapPending = false;
             if (repeatMessageMode === 'count' && repeatMessageSent >= repeatMessageCount) {
-              repeatMessageEnabled = false;
+              if (repeatRestartEnabled) {
+                repeatRestartPending = true;
+              } else {
+                repeatMessageEnabled = false;
+              }
             }
             resetRepeatObservation();
             try {
@@ -620,6 +670,8 @@
     lastClick = { key: "", at: 0 };
     wasStreaming = false;
     repeatPending = false;
+    repeatRestartPending = false;
+    repeatBootstrapPending = false;
     repeatAssistantFingerprint = '';
     repeatAssistantChangedAt = 0;
     repeatResponseObserved = false;
