@@ -5,7 +5,6 @@
   const HIGHLIGHT_ATTR = 'data-approval-hint-wasm';
   const CLICK_DEDUPE_MS = 5000;
   const REPEAT_COOLDOWN_MS = 5000;
-  const ROUTER_TOOL_GRACE_MS = 30000;
   const REPEAT_COMPLETION_SETTLE_MS = 1500;
   const FINAL_IDLE_STABILITY_MS = 4000;
   const COMPOSER_READY_TIMEOUT_MS = 20000;
@@ -32,6 +31,7 @@
   let repeatTurnObservedAt = 0;
   let repeatUiCompletionAt = 0;
   let repeatResponseObserved = false;
+  let repeatCompletionProven = false;
   let repeatIdleSince = 0;
   let lastRepeatSent = 0;
   let eventObserver = null;
@@ -71,9 +71,12 @@
       repeatAssistantChangedAt = 0;
       repeatTurnObservedAt = 0;
       repeatUiCompletionAt = 0;
+      repeatCompletionProven = false;
       repeatIdleSince = 0;
-    } else if (!wasRepeatEnabled) {
-      resetRepeatObservation();
+    } else if (!wasRepeatEnabled || (!repeatResponseObserved && repeatMessageSent === 0 && !repeatBootstrapPending)) {
+      // Enabling repeat after a response has already finished must adopt that
+      // completed assistant turn instead of waiting forever for a new mutation.
+      armRepeatFromCurrentTurn();
     }
 
     const hasWork = autoApprove || autoScroll || repeatMessageEnabled;
@@ -366,7 +369,20 @@
     repeatTurnObservedAt = 0;
     repeatUiCompletionAt = 0;
     repeatResponseObserved = false;
+    repeatCompletionProven = false;
     repeatIdleSince = 0;
+  }
+
+  function armRepeatFromCurrentTurn() {
+    resetRepeatObservation();
+    if (repeatAssistantFingerprint === '0::0:0') return;
+
+    const now = Date.now();
+    repeatAssistantChangedAt = now;
+    repeatTurnObservedAt = now;
+    repeatResponseObserved = true;
+    repeatIdleSince = now;
+    requestTick(FINAL_IDLE_STABILITY_MS + 50);
   }
 
   function observeAssistantOutput() {
@@ -381,6 +397,10 @@
     repeatAssistantChangedAt = changedAt;
     if (!repeatTurnObservedAt) repeatTurnObservedAt = changedAt;
     repeatResponseObserved = true;
+    // Any new assistant output invalidates completion evidence from an earlier
+    // segment. This is the key guard against sending between tool phases.
+    repeatUiCompletionAt = 0;
+    repeatCompletionProven = false;
     return true;
   }
 
@@ -421,65 +441,16 @@
     const turn = latestAssistantTurn();
     if (!turn) return false;
     return !!turn.querySelector(
-      '[data-testid="copy-turn-action-button"], [data-testid="feedback-turn-action-button"]'
+      '[data-testid="copy-turn-action-button"], '
+      + '[data-testid="feedback-turn-action-button"], '
+      + '[data-testid*="copy" i][data-testid*="turn" i], '
+      + 'button[aria-label*="copy" i], '
+      + 'button[aria-label*="good response" i], '
+      + 'button[aria-label*="bad response" i]'
     );
   }
 
-  async function repeatTurnComplete(now, streaming) {
-    if (!repeatResponseObserved || streaming || repeatAssistantChangedAt <= 0) return false;
-    if (repeatIdleSince <= 0 || now - repeatIdleSince < FINAL_IDLE_STABILITY_MS) return false;
-    const quietFor = now - repeatAssistantChangedAt;
-    if (quietFor < REPEAT_COMPLETION_SETTLE_MS) return false;
-
-    try {
-      const response = await runtimeMessage({ type: 'approval:get-turn-signal' });
-      const signal = response?.signal;
-      if (response?.ok && signal?.available) {
-        const freshnessFloor = Math.max(0, (repeatTurnObservedAt || repeatAssistantChangedAt) - 5000);
-        const latestSignalAt = Math.max(
-          Number(signal.lastFinalTextAt || 0),
-          Number(signal.lastToolCallAt || 0),
-          Number(signal.lastToolResultAt || 0),
-        );
-        const fresh = latestSignalAt >= freshnessFloor;
-        return fresh
-          && signal.sseActive === 0
-          && signal.messageStreamComplete === true
-          && signal.messageCompleteObserved === true
-          && signal.postToolFinalText === true;
-      }
-    } catch {
-      // Fall through to ChatGPT UI completion evidence.
-    }
-
-    if (repeatUiCompletionAt > 0
-      && repeatUiCompletionAt >= Math.max(0, (repeatTurnObservedAt || 0) - 5000)) {
-      return true;
-    }
-
-    // Native ChatGPT completion signal. The final response action toolbar is
-    // attached only after the assistant turn is complete; tool-call/tool-result
-    // intermediate phases do not expose these turn actions.
-    if (hasNativeFinalTurnActions()) return true;
-
-    // A quiet gap can occur between tool phases, so silence alone is not completion evidence.
-    return false;
-  }
-
-  function isStreaming() {
-    if ((window.__browserRouterSseCapture?.active || 0) > 0) return true;
-
-    const lastFinalText = Number(window.__browserRouterLastFinalTextAt || 0);
-    const lastToolActivity = Math.max(
-      Number(window.__browserRouterLastToolCallAt || 0),
-      Number(window.__browserRouterLastToolResultAt || 0),
-    );
-    if (lastToolActivity > lastFinalText && Date.now() - lastToolActivity < ROUTER_TOOL_GRACE_MS) {
-      return true;
-    }
-
-    // An active composer Stop control is authoritative. Never age it out:
-    // long-running tool calls can be quiet while the same turn is still active.
+  function hasActiveStopControl() {
     const stopButton = document.querySelector(
       '#composer-submit-button[data-testid="stop-button"], '
       + '#composer-submit-button[data-testid*="stop" i], '
@@ -487,6 +458,35 @@
       + 'button[data-testid="stop-button"]'
     );
     return !!stopButton && enabledButton(stopButton);
+  }
+
+  function hasReadyComposerForNextTurn() {
+    const editor = findComposer();
+    if (!editor) return false;
+    return !hasActiveStopControl();
+  }
+
+  function hasStrongUiTurnCompletion(now = Date.now()) {
+    if (!repeatResponseObserved || repeatAssistantChangedAt <= 0) return false;
+    if (!hasNativeFinalTurnActions()) return false;
+    if (!hasReadyComposerForNextTurn()) return false;
+    return now - repeatAssistantChangedAt >= REPEAT_COMPLETION_SETTLE_MS;
+  }
+
+  function repeatTurnComplete(now) {
+    if (!repeatResponseObserved || repeatAssistantChangedAt <= 0) return false;
+    if (repeatIdleSince <= 0 || now - repeatIdleSince < FINAL_IDLE_STABILITY_MS) return false;
+    if (!hasStrongUiTurnCompletion(now)) return false;
+
+    repeatCompletionProven = true;
+    return true;
+  }
+
+  function isStreaming() {
+    // A hidden ChatGPT tab can retain an enabled Stop control after the turn has
+    // actually completed. Only the strong local terminal proof above may bypass it.
+    if (repeatCompletionProven && hasStrongUiTurnCompletion()) return false;
+    return hasActiveStopControl();
   }
 
   function findComposer() {
@@ -610,8 +610,23 @@
       console.warn('[approval-hint-wasm] repeat message: send button not ready; will retry');
       return false;
     }
+
+    // Bootstrap sends start a new chat and therefore have no preceding assistant
+    // turn to prove. Every repeat-after-turn send is revalidated at the commit
+    // point so a newly resumed tool/assistant phase cannot race the click.
+    if (!repeatBootstrapPending) {
+      const latestFingerprint = currentAssistantFingerprint();
+      if (latestFingerprint !== repeatAssistantFingerprint
+        || !repeatCompletionProven
+        || !hasStrongUiTurnCompletion()) {
+        repeatCompletionProven = false;
+        console.debug('[approval-hint-wasm] repeat message: completed turn proof changed before send; refusing to submit');
+        return false;
+      }
+    }
+
     if (isStreaming()) {
-      console.debug('[approval-hint-wasm] repeat message: turn resumed before send; refusing to submit');
+      console.debug('[approval-hint-wasm] repeat message: turn still active at send boundary; refusing to submit');
       return false;
     }
 
@@ -625,19 +640,19 @@
     try {
       if (repeatMessageEnabled) {
         const assistantChanged = observeAssistantOutput();
-        const streaming = isStreaming();
-        wasStreaming = streaming;
-
         const now = Date.now();
 
-        if (streaming) {
-          repeatIdleSince = 0;
+        if (assistantChanged) {
+          repeatIdleSince = now;
           repeatPending = false;
         } else {
           if (repeatIdleSince <= 0) repeatIdleSince = now;
           const idleRemaining = FINAL_IDLE_STABILITY_MS - (now - repeatIdleSince);
           if (idleRemaining > 0) requestTick(idleRemaining + 50);
         }
+
+        let streaming = isStreaming();
+        wasStreaming = streaming;
 
         if (assistantChanged) {
           requestTick(REPEAT_COMPLETION_SETTLE_MS + 50);
@@ -681,8 +696,10 @@
           }
         }
 
-        if (!repeatPending && await repeatTurnComplete(now, streaming)) {
+        if (!repeatPending && repeatTurnComplete(now)) {
           repeatPending = true;
+          streaming = isStreaming();
+          wasStreaming = streaming;
           console.info('[approval-hint-wasm] repeat message: final turn completion observed');
         }
 
@@ -862,6 +879,7 @@
     repeatTurnObservedAt = 0;
     repeatUiCompletionAt = 0;
     repeatResponseObserved = false;
+    repeatCompletionProven = false;
     repeatIdleSince = 0;
     lastRepeatSent = 0;
     clearHighlights();
