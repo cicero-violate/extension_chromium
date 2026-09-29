@@ -15,7 +15,7 @@
     taskTitle: $('taskTitle'), taskRole: $('taskRole'), taskPriority: $('taskPriority'), taskPrompt: $('taskPrompt'), taskDeps: $('taskDeps'), createTask: $('createTask'),
     tasks: $('tasks'), taskCount: $('taskCount'), workers: $('workers'), workerCount: $('workerCount'),
     messageTarget: $('messageTarget'), messageBody: $('messageBody'), sendMessage: $('sendMessage'), inbox: $('inbox'), inboxCount: $('inboxCount'),
-    traffic: $('traffic'), trafficCount: $('trafficCount'), journal: $('journal'),
+    traffic: $('traffic'), trafficCount: $('trafficCount'), journal: $('journal'), viewTabs: $('viewTabs'),
   };
 
   function send(type, payload = {}) {
@@ -102,6 +102,30 @@
     return `${worker.id} · ${context}`;
   }
 
+  function workerTabTitle(worker) {
+    const title = String(worker?.title || '').trim();
+    return title || String(worker?.name || '').trim() || 'ChatGPT tab';
+  }
+
+  const VIEW_NAMES = ['overview', 'tasks', 'messages', 'diagnostics'];
+  const VIEW_STORAGE_KEY = 'modelFleetControl:view:v1';
+
+  function setView(requested, persist = true) {
+    const view = VIEW_NAMES.includes(requested) ? requested : 'overview';
+    for (const tab of els.viewTabs.querySelectorAll('[data-view]')) {
+      const active = tab.dataset.view === view;
+      tab.classList.toggle('active', active);
+      tab.setAttribute('aria-selected', active ? 'true' : 'false');
+      tab.tabIndex = active ? 0 : -1;
+    }
+    for (const panel of document.querySelectorAll('[data-view-panel]')) {
+      panel.hidden = panel.dataset.viewPanel !== view;
+    }
+    if (persist) {
+      try { localStorage.setItem(VIEW_STORAGE_KEY, view); } catch {}
+    }
+  }
+
   function setStatus(text, error = false) {
     els.status.textContent = text;
     els.status.style.color = error ? 'var(--red)' : 'var(--green)';
@@ -143,7 +167,7 @@
         ? `<button class="mini" data-action="cancel-dispatch" data-worker="${escapeHtml(worker.id)}">Cancel / clear</button>`
         : '';
       return `<div class="worker" data-worker="${escapeHtml(worker.id)}">
-        <div class="topline"><div><div class="name">${escapeHtml(worker.name)}</div><div class="role">${escapeHtml(worker.id)} · ${escapeHtml(worker.role)}</div></div><span class="pill ${statusClass}">${escapeHtml(status.toUpperCase())}</span></div>
+        <div class="topline"><div><div class="name tab-name" title="${escapeHtml(workerTabTitle(worker))}">${escapeHtml(workerTabTitle(worker))}</div><div class="role">${escapeHtml(worker.id)} · ${escapeHtml(worker.role)}</div></div><span class="pill ${statusClass}">${escapeHtml(status.toUpperCase())}</span></div>
         <div class="small" style="margin-top:6px">${escapeHtml(assignment)} · ${escapeHtml(lifecycle)} · heartbeat ${age === null ? 'never' : `${age}s ago`}</div>
         <div class="small" title="${escapeHtml(urlInfo.full)}">URL · ${escapeHtml(urlInfo.short)}</div>
         <div class="caps">${escapeHtml((worker.capabilities || []).join(' · '))}</div>
@@ -440,6 +464,29 @@
     if (!button) return;
     send('fleet:retry-task', { taskId: button.dataset.task }).then((response) => { snapshot = normalizeSnapshot(response.snapshot); render(); }).catch((error) => setStatus(String(error), true));
   });
+
+  els.viewTabs.addEventListener('click', (event) => {
+    const tab = event.target.closest('[data-view]');
+    if (tab) setView(tab.dataset.view);
+  });
+
+  els.viewTabs.addEventListener('keydown', (event) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const tabs = [...els.viewTabs.querySelectorAll('[data-view]')];
+    const current = Math.max(0, tabs.findIndex((tab) => tab.classList.contains('active')));
+    const next = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? tabs.length - 1
+        : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    event.preventDefault();
+    setView(tabs[next].dataset.view);
+    tabs[next].focus();
+  });
+
+  let initialView = 'overview';
+  try { initialView = localStorage.getItem(VIEW_STORAGE_KEY) || initialView; } catch {}
+  setView(initialView, false);
 
   refresh().catch((error) => setStatus(String(error), true));
   refreshTimer = setInterval(updateHeartbeatDisplays, 5000);
