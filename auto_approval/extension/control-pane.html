@@ -25,8 +25,8 @@
     input,textarea,select{border:1px solid var(--strong);background:#0d141d;border-radius:8px;padding:8px 10px;outline:none} textarea{resize:vertical;min-height:74px;width:100%} input:focus,textarea:focus,select:focus{border-color:#536d94}
     .view-tabs{display:flex;gap:6px;padding:8px 12px;border-bottom:1px solid var(--border);background:#0b1017;position:sticky;top:62px;z-index:4}
     .view-tab{border:1px solid transparent;background:transparent;color:var(--muted);padding:7px 12px;border-radius:8px;font-weight:700}
-    .view-tab:hover{color:var(--text);background:#111925}.view-tab.active{color:var(--text);background:#172235;border-color:#3d5273}
-    .workspace{padding:12px}.view-panel[hidden]{display:none!important}.view-grid{display:grid;gap:12px;align-items:start}
+    .view-tab:hover{color:var(--text);background:#111925}.view-tab.active{color:var(--text);background:#172235;border-color:#3d5273}.message-view-tabs{display:flex;gap:6px;margin-bottom:12px;padding:5px;border:1px solid var(--border);border-radius:10px;background:#0b1017;width:max-content;max-width:100%;overflow-x:auto}.message-view-tab{border:1px solid transparent;background:transparent;color:var(--muted);padding:7px 11px;border-radius:7px;font-weight:700;white-space:nowrap}.message-view-tab:hover{color:var(--text);background:#111925}.message-view-tab.active{color:var(--text);background:#172235;border-color:#3d5273}
+    .workspace{padding:12px}.view-panel[hidden],.message-view-panel[hidden]{display:none!important}.view-grid{display:grid;gap:12px;align-items:start}
     .overview-grid{grid-template-columns:minmax(280px,360px) minmax(0,1fr)}.tasks-grid{grid-template-columns:minmax(360px,.85fr) minmax(0,1.15fr)}
     .messages-grid{grid-template-columns:minmax(360px,.75fr) minmax(0,1.25fr)}.diagnostics-grid{grid-template-columns:minmax(320px,.8fr) minmax(0,1.2fr)}
     .column{display:grid;gap:12px}.panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}.head{min-height:41px;padding:9px 11px;border-bottom:1px solid var(--border);background:#101721;display:flex;align-items:center;justify-content:space-between;gap:10px}.title{font-size:12px;font-weight:780;text-transform:uppercase;letter-spacing:.07em}.meta{font-size:11px;color:var(--muted)}.body{padding:11px}
@@ -36,7 +36,7 @@
     .pending{color:#aeb8c5}.running{color:var(--blue);border-color:rgba(116,168,255,.35);background:rgba(116,168,255,.08)}.done{color:var(--green);border-color:rgba(93,211,158,.35);background:rgba(93,211,158,.08)}.blocked{color:var(--red);border-color:rgba(242,119,122,.35);background:rgba(242,119,122,.08)}
     .task-result,.message-body{white-space:pre-wrap;color:#c6cfdb;margin-top:6px;max-height:110px;overflow:auto}.worker-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:7px}.worker{margin:0}.worker-actions{display:flex;gap:5px;margin-top:7px;flex-wrap:wrap}.mini{border:1px solid var(--strong);background:#161f2d;border-radius:6px;padding:4px 6px;font-size:11px}.role{color:var(--violet);font-size:11px}.tab-name{max-width:460px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.caps{color:var(--muted);font-size:10px;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .invariant{display:grid;grid-template-columns:18px 1fr auto;gap:7px;padding:8px 0;border-bottom:1px solid #1a2230;align-items:center}.invariant:last-child{border-bottom:0}.ok{color:var(--green)}.warn{color:var(--amber)}.bad{color:var(--red)}
-    .journal{max-height:560px;overflow:auto}.event{display:grid;grid-template-columns:72px 1fr;gap:7px;padding:5px 0;border-bottom:1px solid #151d29;font-size:11px}.event-time{color:#657386;font-variant-numeric:tabular-nums}.event-text{color:#c5cfdb}.operator{border-color:#3e375d;background:#12101c}.toolbar{display:flex;gap:6px;flex-wrap:wrap}.form-grid{display:grid;grid-template-columns:1fr 150px 90px;gap:7px}.statusline{min-height:18px;color:var(--green);font-size:11px;margin-top:6px}
+    .journal{max-height:560px;overflow:auto}.event{display:grid;grid-template-columns:72px 1fr;gap:7px;padding:5px 0;border-bottom:1px solid #151d29;font-size:11px}.event-time{color:#657386;font-variant-numeric:tabular-nums}.event-text{color:#c5cfdb}.operator{border-color:#3e375d;background:#12101c}.toolbar{display:flex;gap:6px;flex-wrap:wrap}.form-grid{display:grid;grid-template-columns:1fr 150px 90px;gap:7px}.statusline{min-height:18px;color:var(--green);font-size:11px;margin-top:6px}.head-controls{display:flex;align-items:center;gap:7px}.sort-select{padding:4px 7px;font-size:11px;border-radius:6px;background:#0d141d}
     .empty{color:var(--muted);padding:8px 0}.exception{border-color:#493c22;background:#17140d}.exception strong{color:var(--amber)}
     @media(max-width:1080px){.overview-grid,.tasks-grid,.messages-grid,.diagnostics-grid{grid-template-columns:1fr}}
     @media(max-width:760px){.worker-grid{grid-template-columns:1fr}.goalbar{grid-template-columns:1fr 1fr}.goal-wrap{grid-column:1/-1}.health{display:none}.form-grid{grid-template-columns:1fr}.view-tabs{overflow-x:auto}.view-tab{white-space:nowrap}}
@@ -103,18 +103,31 @@
     </section>
 
     <section class="view-panel" data-view-panel="messages" hidden>
-      <div class="view-grid messages-grid">
-        <section class="panel"><div class="head"><div class="title">Natural-language bus</div><div class="meta">operator → worker</div></div><div class="body stack">
-          <select id="messageTarget"><option value="">Select worker</option></select>
-          <textarea id="messageBody" placeholder="Send a natural-language message to one worker. It will be delivered only when that worker is idle."></textarea>
-          <button class="button primary" id="sendMessage">Send message</button>
-        </div></section>
-
-        <div class="column">
-          <section class="panel"><div class="head"><div class="title">Operator inbox</div><div class="meta" id="inboxCount">0</div></div><div class="body" id="inbox"></div></section>
-          <section class="panel"><div class="head"><div class="title">Semantic traffic</div><div class="meta" id="trafficCount">0</div></div><div class="body" id="traffic"></div></section>
-        </div>
+      <div class="message-view-tabs" id="messageViewTabs" role="tablist" aria-label="Message views">
+        <button class="message-view-tab" type="button" role="tab" aria-selected="false" data-message-view="all">All threads</button>
+        <button class="message-view-tab active" type="button" role="tab" aria-selected="true" data-message-view="operator">Operator inbox</button>
+        <button class="message-view-tab" type="button" role="tab" aria-selected="false" data-message-view="traffic">Semantic traffic</button>
       </div>
+
+      <section class="message-view-panel" data-message-view-panel="all" hidden>
+        <section class="panel"><div class="head"><div class="title">All threads</div><div class="head-controls"><div class="meta" id="allThreadsCount">0</div><select class="sort-select" id="allThreadsSort" aria-label="Sort all threads"><option value="newest">Newest</option><option value="oldest">Oldest</option></select></div></div><div class="body" id="allThreads"></div></section>
+      </section>
+
+      <section class="message-view-panel" data-message-view-panel="operator">
+        <div class="view-grid messages-grid">
+          <section class="panel"><div class="head"><div class="title">Natural-language bus</div><div class="meta">operator → worker</div></div><div class="body stack">
+            <select id="messageTarget"><option value="">Select worker</option></select>
+            <textarea id="messageBody" placeholder="Send a natural-language message to one worker. It will be delivered only when that worker is idle."></textarea>
+            <button class="button primary" id="sendMessage">Send message</button>
+          </div></section>
+
+          <section class="panel"><div class="head"><div class="title">Operator inbox</div><div class="head-controls"><div class="meta" id="inboxCount">0</div><select class="sort-select" id="inboxSort" aria-label="Sort operator inbox"><option value="newest">Newest</option><option value="oldest">Oldest</option></select></div></div><div class="body" id="inbox"></div></section>
+        </div>
+      </section>
+
+      <section class="message-view-panel" data-message-view-panel="traffic" hidden>
+        <section class="panel"><div class="head"><div class="title">Semantic traffic</div><div class="head-controls"><div class="meta" id="trafficCount">0</div><select class="sort-select" id="trafficSort" aria-label="Sort semantic traffic"><option value="newest">Newest</option><option value="oldest">Oldest</option></select></div></div><div class="body" id="traffic"></div></section>
+      </section>
     </section>
 
     <section class="view-panel" data-view-panel="diagnostics" hidden>

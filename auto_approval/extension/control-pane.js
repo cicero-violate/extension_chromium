@@ -14,8 +14,8 @@
     invariants: $('invariants'), exceptions: $('exceptions'), exceptionCount: $('exceptionCount'),
     taskTitle: $('taskTitle'), taskRole: $('taskRole'), taskPriority: $('taskPriority'), taskPrompt: $('taskPrompt'), taskDeps: $('taskDeps'), createTask: $('createTask'),
     tasks: $('tasks'), taskCount: $('taskCount'), workers: $('workers'), workerCount: $('workerCount'),
-    messageTarget: $('messageTarget'), messageBody: $('messageBody'), sendMessage: $('sendMessage'), inbox: $('inbox'), inboxCount: $('inboxCount'),
-    traffic: $('traffic'), trafficCount: $('trafficCount'), journal: $('journal'), viewTabs: $('viewTabs'),
+    messageTarget: $('messageTarget'), messageBody: $('messageBody'), sendMessage: $('sendMessage'), allThreads: $('allThreads'), allThreadsCount: $('allThreadsCount'), allThreadsSort: $('allThreadsSort'), inbox: $('inbox'), inboxCount: $('inboxCount'), inboxSort: $('inboxSort'),
+    traffic: $('traffic'), trafficCount: $('trafficCount'), trafficSort: $('trafficSort'), journal: $('journal'), viewTabs: $('viewTabs'), messageViewTabs: $('messageViewTabs'),
   };
 
   function send(type, payload = {}) {
@@ -97,9 +97,10 @@
   function workerTargetLabel(worker) {
     const url = workerUrlInfo(worker);
     const title = String(worker?.title || '').trim();
+    const role = String(worker?.role || 'generalist').trim() || 'generalist';
     const genericTitle = !title || /^chatgpt(?:\s*[-—].*)?$/i.test(title);
     const context = genericTitle ? url.short : `${compact(title, 36)} · ${url.short}`;
-    return `${worker.id} · ${context}`;
+    return `${worker.id} · ${role} · ${context}`;
   }
 
   function workerTabTitle(worker) {
@@ -109,6 +110,8 @@
 
   const VIEW_NAMES = ['overview', 'tasks', 'messages', 'diagnostics'];
   const VIEW_STORAGE_KEY = 'modelFleetControl:view:v1';
+  const MESSAGE_VIEW_NAMES = ['all', 'operator', 'traffic'];
+  const MESSAGE_VIEW_STORAGE_KEY = 'modelFleetControl:messageView:v1';
 
   function setView(requested, persist = true) {
     const view = VIEW_NAMES.includes(requested) ? requested : 'overview';
@@ -123,6 +126,22 @@
     }
     if (persist) {
       try { localStorage.setItem(VIEW_STORAGE_KEY, view); } catch {}
+    }
+  }
+
+  function setMessageView(requested, persist = true) {
+    const view = MESSAGE_VIEW_NAMES.includes(requested) ? requested : 'operator';
+    for (const tab of els.messageViewTabs.querySelectorAll('[data-message-view]')) {
+      const active = tab.dataset.messageView === view;
+      tab.classList.toggle('active', active);
+      tab.setAttribute('aria-selected', active ? 'true' : 'false');
+      tab.tabIndex = active ? 0 : -1;
+    }
+    for (const panel of document.querySelectorAll('[data-message-view-panel]')) {
+      panel.hidden = panel.dataset.messageViewPanel !== view;
+    }
+    if (persist) {
+      try { localStorage.setItem(MESSAGE_VIEW_STORAGE_KEY, view); } catch {}
     }
   }
 
@@ -144,6 +163,33 @@
   function taskRunnable(task) {
     if (!snapshot || task.status !== 'pending') return false;
     return (task.dependencies || []).every((id) => snapshot.tasks?.[id]?.status === 'done');
+  }
+
+  function messageTime(message) {
+    return Number(message?.createdAt || message?.completedAt || 0) || 0;
+  }
+
+  function sortMessages(list, direction) {
+    const sorted = list.slice().sort((a, b) => messageTime(a) - messageTime(b));
+    return direction === 'oldest' ? sorted : sorted.reverse();
+  }
+
+  function messageRoute(message) {
+    const from = message.fromWorkerId || message.from || 'operator';
+    const to = message.toWorkerId === 'operator' ? 'you' : (message.toWorkerId || 'unknown');
+    return `${from} → ${to}`;
+  }
+
+  function renderMessageCard(message, operatorStyle = false, bodyMax = 700) {
+    const status = safeStatus(message.status, message.toWorkerId === 'operator' ? 'delivered' : 'unknown');
+    const statusClass = status === 'running' ? 'running' : status === 'done' || status === 'delivered' ? 'done' : status === 'cancelled' ? 'blocked' : 'pending';
+    const response = message.response ? `<div class="small" style="margin-top:5px">response: ${escapeHtml(compact(message.response, 350))}</div>` : '';
+    return `<div class="message ${operatorStyle ? 'operator' : ''}">
+      <div class="topline"><div class="name">${escapeHtml(messageRoute(message))}</div><span class="pill ${statusClass}">${escapeHtml(status.toUpperCase())}</span></div>
+      <div class="message-body">${escapeHtml(compact(message.body, bodyMax))}</div>
+      ${response}
+      <div class="small" style="margin-top:5px">${formatTime(message.createdAt)}${message.taskId ? ` · ${escapeHtml(message.taskId)}` : ''}</div>
+    </div>`;
   }
 
   function renderWorkers() {
@@ -233,23 +279,25 @@
 
   function renderMessages() {
     const list = snapshot?.messages || [];
-    const inbox = list.filter((message) => message.toWorkerId === 'operator').slice().reverse();
-    const traffic = list.filter((message) => message.toWorkerId !== 'operator').slice(-30).reverse();
+    const allThreads = sortMessages(list, els.allThreadsSort.value);
+    const inbox = sortMessages(list.filter((message) => message.toWorkerId === 'operator'), els.inboxSort.value);
+    const traffic = sortMessages(list.filter((message) => message.toWorkerId !== 'operator'), els.trafficSort.value).slice(0, 30);
+    els.allThreadsCount.textContent = String(allThreads.length);
     els.inboxCount.textContent = String(inbox.length);
     els.trafficCount.textContent = String(traffic.length);
     els.messageMetric.textContent = String(list.filter((m) => ['queued','running'].includes(m.status)).length);
 
-    els.inbox.innerHTML = inbox.length ? inbox.map((message) => `<div class="message operator">
-      <div class="topline"><div class="name">${escapeHtml(message.fromWorkerId || message.from || 'worker')} → you</div><span class="pill done">${escapeHtml(safeStatus(message.status, 'delivered').toUpperCase())}</span></div>
-      <div class="message-body">${escapeHtml(compact(message.body, 1200))}</div>
-      <div class="small">${formatTime(message.createdAt)}${message.taskId ? ` · ${escapeHtml(message.taskId)}` : ''}</div>
-    </div>`).join('') : '<div class="empty">No worker messages to the operator.</div>';
+    els.allThreads.innerHTML = allThreads.length
+      ? allThreads.map((message) => renderMessageCard(message, message.toWorkerId === 'operator', 900)).join('')
+      : '<div class="empty">No semantic messages yet.</div>';
 
-    els.traffic.innerHTML = traffic.length ? traffic.map((message) => `<div class="message">
-      <div class="topline"><div class="name">${escapeHtml(message.fromWorkerId || message.from || 'operator')} → ${escapeHtml(message.toWorkerId || 'unknown')}</div><span class="pill ${safeStatus(message.status) === 'running' ? 'running' : safeStatus(message.status) === 'done' ? 'done' : safeStatus(message.status) === 'cancelled' ? 'blocked' : 'pending'}">${escapeHtml(safeStatus(message.status).toUpperCase())}</span></div>
-      <div class="message-body">${escapeHtml(compact(message.body, 500))}</div>
-      ${message.response ? `<div class="small" style="margin-top:5px">response: ${escapeHtml(compact(message.response, 250))}</div>` : ''}
-    </div>`).join('') : '<div class="empty">No semantic traffic yet.</div>';
+    els.inbox.innerHTML = inbox.length
+      ? inbox.map((message) => renderMessageCard(message, true, 1200)).join('')
+      : '<div class="empty">No worker messages to the operator.</div>';
+
+    els.traffic.innerHTML = traffic.length
+      ? traffic.map((message) => renderMessageCard(message, false, 500)).join('')
+      : '<div class="empty">No semantic traffic yet.</div>';
 
     const current = els.messageTarget.value;
     els.messageTarget.innerHTML = '<option value="">Select worker by tab</option>' + workers().filter((w) => w.enabled).map((w) => `<option value="${escapeHtml(w.id)}" title="${escapeHtml(w.url || '')}">${escapeHtml(workerTargetLabel(w))}</option>`).join('');
@@ -416,6 +464,10 @@
     }).catch((error) => setStatus(String(error), true));
   });
 
+  for (const select of [els.allThreadsSort, els.inboxSort, els.trafficSort]) {
+    select.addEventListener('change', () => renderMessages());
+  }
+
   els.sendMessage.addEventListener('click', () => {
     if (!els.messageTarget.value || !els.messageBody.value.trim()) return setStatus('Choose a worker and enter a message', true);
     send('fleet:send-message', { toWorkerId: els.messageTarget.value, body: els.messageBody.value }).then((response) => {
@@ -470,6 +522,25 @@
     if (tab) setView(tab.dataset.view);
   });
 
+  els.messageViewTabs.addEventListener('click', (event) => {
+    const tab = event.target.closest('[data-message-view]');
+    if (tab) setMessageView(tab.dataset.messageView);
+  });
+
+  els.messageViewTabs.addEventListener('keydown', (event) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const tabs = [...els.messageViewTabs.querySelectorAll('[data-message-view]')];
+    const current = Math.max(0, tabs.findIndex((tab) => tab.classList.contains('active')));
+    const next = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? tabs.length - 1
+        : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    event.preventDefault();
+    setMessageView(tabs[next].dataset.messageView);
+    tabs[next].focus();
+  });
+
   els.viewTabs.addEventListener('keydown', (event) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     const tabs = [...els.viewTabs.querySelectorAll('[data-view]')];
@@ -487,6 +558,10 @@
   let initialView = 'overview';
   try { initialView = localStorage.getItem(VIEW_STORAGE_KEY) || initialView; } catch {}
   setView(initialView, false);
+
+  let initialMessageView = 'operator';
+  try { initialMessageView = localStorage.getItem(MESSAGE_VIEW_STORAGE_KEY) || initialMessageView; } catch {}
+  setMessageView(initialMessageView, false);
 
   refresh().catch((error) => setStatus(String(error), true));
   refreshTimer = setInterval(updateHeartbeatDisplays, 5000);
