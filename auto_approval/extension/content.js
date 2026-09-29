@@ -1,6 +1,16 @@
 (() => {
   'use strict';
 
+  const runtime = globalThis.chrome?.runtime;
+  if (!runtime?.onMessage || typeof runtime.sendMessage !== 'function') {
+    console.warn('[approval-hint-wasm] extension runtime unavailable; waiting for reinjection');
+    return;
+  }
+
+  const BOOTSTRAP_KEY = '__approvalHintWasmContentV1';
+  if (globalThis[BOOTSTRAP_KEY]) return;
+  globalThis[BOOTSTRAP_KEY] = true;
+
   const APPROVAL_WAKE_THROTTLE_MS = 100;
   const HIGHLIGHT_ATTR = 'data-approval-hint-wasm';
   const CLICK_DEDUPE_MS = 5000;
@@ -9,11 +19,20 @@
   const FINAL_IDLE_STABILITY_MS = 4000;
   const COMPOSER_READY_TIMEOUT_MS = 20000;
   const SEND_READY_TIMEOUT_MS = 5000;
+  const TURN_SIGNAL_CACHE_MS = 500;
+  const streamRetryApi = globalThis.ApprovalStreamRetry;
+  const streamRetryController = streamRetryApi?.createController();
+  const deliveryTimeoutRetryController = streamRetryApi?.createResendController?.();
+  let retryExhaustionLoggedFor = '';
+  let deliveryTimeoutExhaustionLoggedFor = '';
+  const TURN_INTERRUPTION_RE = /\b(?:connection interrupted|waiting for (?:the )?complete answer)\b/i;
+  const TURN_FAILURE_RE = /\b(?:something went wrong|network error|message delivery timed out|there was an error generating (?:a )?response|error generating (?:a )?response)\b/i;
   let wasmExports = null;
   let wasmPromise = null;
   let tabEnabled = false;
   let autoApprove = true;
   let autoScroll = true;
+  let autoRetry = false;
   let lastClick = { key: '', at: 0 };
   let repeatMessageEnabled = false;
   let repeatMessage = '';
@@ -34,6 +53,11 @@
   let repeatCompletionProven = false;
   let repeatIdleSince = 0;
   let lastRepeatSent = 0;
+  let repeatTurnSignal = { available: false };
+  let repeatTurnSignalAt = 0;
+  let repeatFailureKey = '';
+  const assistantTurnNodeIds = new WeakMap();
+  let nextAssistantTurnNodeId = 1;
   let eventObserver = null;
   let wakeTimer = null;
   let wakeAt = 0;
@@ -42,12 +66,39 @@
 
   function runtimeMessage(message) {
     return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage(message, (response) => {
-        const error = chrome.runtime.lastError;
-        if (error) reject(error);
-        else resolve(response);
-      });
+      try {
+        runtime.sendMessage(message, (response) => {
+          const error = runtime.lastError;
+          if (error) reject(error);
+          else resolve(response);
+        });
+      } catch (error) {
+        reject(error);
+      }
     });
+  }
+
+  function invalidateRepeatTurnSignal() {
+    repeatTurnSignal = { available: false };
+    repeatTurnSignalAt = 0;
+  }
+
+  async function getRepeatTurnSignal(force = false) {
+    const now = Date.now();
+    if (!force && repeatTurnSignalAt > 0 && now - repeatTurnSignalAt < TURN_SIGNAL_CACHE_MS) {
+      return repeatTurnSignal;
+    }
+
+    try {
+      const response = await runtimeMessage({ type: 'approval:get-turn-signal' });
+      repeatTurnSignal = response?.ok && response.signal
+        ? response.signal
+        : { available: false, queryFailed: true };
+    } catch {
+      repeatTurnSignal = { available: false, queryFailed: true };
+    }
+    repeatTurnSignalAt = now;
+    return repeatTurnSignal;
   }
 
   function applyTabState(state = {}) {
@@ -55,6 +106,7 @@
     tabEnabled = state.enabled === true;
     autoApprove = state.autoApprove !== false;
     autoScroll = state.autoScroll !== false;
+    autoRetry = state.autoRetry === true;
     repeatMessageEnabled = state.repeatMessageEnabled === true;
     repeatMessage = typeof state.repeatMessage === 'string' ? state.repeatMessage : '';
     repeatMessageMode = state.repeatMessageMode === 'count' ? 'count' : 'forever';
@@ -79,7 +131,7 @@
       armRepeatFromCurrentTurn();
     }
 
-    const hasWork = autoApprove || autoScroll || repeatMessageEnabled;
+    const hasWork = autoApprove || autoScroll || repeatMessageEnabled || autoRetry;
     if (tabEnabled && hasWork) {
       startWatching();
     } else {
@@ -98,9 +150,23 @@
     }
   }
 
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message?.type !== 'approval:tab-state-changed') return;
-    applyTabState(message.state);
+  runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === 'approval:bridge-ping') {
+      sendResponse({ ok: true });
+      return false;
+    }
+    if (message?.type === 'approval:tab-state-changed') {
+      applyTabState(message.state);
+      return;
+    }
+    if (message?.type === 'approval:send-message-now') {
+      sendMessageNow(String(message.text || ''), true)
+        .then((sent) => sendResponse(sent
+          ? { ok: true }
+          : { ok: false, error: 'Message could not be sent from the current ChatGPT state.' }))
+        .catch((error) => sendResponse({ ok: false, error: String(error) }));
+      return true;
+    }
   });
 
   function fallbackScorer() {
@@ -128,7 +194,7 @@
     if (wasmPromise) return wasmPromise;
     wasmPromise = (async () => {
       try {
-        const url = chrome.runtime.getURL('approval_hint_wasm.wasm');
+        const url = runtime.getURL('approval_hint_wasm.wasm');
         const response = await fetch(url);
         if (!response.ok) throw new Error(`wasm fetch failed: ${response.status} ${response.statusText}`);
         const bytes = await response.arrayBuffer();
@@ -349,18 +415,70 @@
     return null;
   }
 
-  function currentAssistantFingerprint() {
-    const nodes = document.querySelectorAll('[data-message-author-role="assistant"]');
-    const latest = nodes[nodes.length - 1];
-    if (!latest) return '0::0:0';
-    const text = (latest.innerText || latest.textContent || '').trim();
+  function isUserTurnNode(node) {
+    let current = node;
+    while (current && current !== document.documentElement) {
+      if (String(current.className || '').includes('user-message')) return true;
+      current = current.parentElement;
+    }
+    return false;
+  }
+
+  function assistantTurnActionRows() {
+    return [...document.querySelectorAll('.turn-action-controls')].filter((row) => {
+      if (isUserTurnNode(row)) return false;
+      return !!row.querySelector(
+        'button[aria-label="Copy"], '
+        + 'button[aria-label*="good response" i], '
+        + 'button[aria-label*="bad response" i]'
+      );
+    });
+  }
+
+  function latestAssistantActionRow() {
+    const rows = assistantTurnActionRows();
+    return rows[rows.length - 1] || null;
+  }
+
+  function assistantTurnNodeId(node) {
+    if (!node) return 0;
+    let id = assistantTurnNodeIds.get(node);
+    if (!id) {
+      id = nextAssistantTurnNodeId++;
+      assistantTurnNodeIds.set(node, id);
+    }
+    return id;
+  }
+
+  function hashText(text) {
     let hash = 2166136261;
     for (let i = 0; i < text.length; i += 1) {
       hash ^= text.charCodeAt(i);
       hash = Math.imul(hash, 16777619);
     }
-    const id = latest.getAttribute('data-message-id') || latest.id || '';
-    return `${nodes.length}:${id}:${text.length}:${hash >>> 0}`;
+    return hash >>> 0;
+  }
+
+  function currentAssistantFingerprint() {
+    // Legacy/older ChatGPT DOM.
+    const nodes = document.querySelectorAll('[data-message-author-role="assistant"]');
+    const latest = nodes[nodes.length - 1];
+    if (latest) {
+      const text = (latest.innerText || latest.textContent || '').trim();
+      const id = latest.getAttribute('data-message-id') || latest.id || '';
+      return 'legacy:' + nodes.length + ':' + id + ':' + text.length + ':' + hashText(text);
+    }
+
+    // Current ChatGPT DOM (2026): assistant/user role attributes and
+    // conversation-turn testids are absent. The durable end-of-turn boundary is
+    // the assistant action row. User action rows live under *user-message* and
+    // use "Copy message"; assistant rows are outside that subtree and expose
+    // "Copy"/feedback actions.
+    const row = latestAssistantActionRow();
+    if (!row) return '0::0:0';
+    const turn = row.parentElement || row;
+    const text = (turn.innerText || turn.textContent || '').trim();
+    return 'actions:' + assistantTurnNodeId(row) + ':' + text.length + ':' + hashText(text);
   }
 
   function resetRepeatObservation() {
@@ -371,6 +489,8 @@
     repeatResponseObserved = false;
     repeatCompletionProven = false;
     repeatIdleSince = 0;
+    repeatFailureKey = '';
+    invalidateRepeatTurnSignal();
   }
 
   function armRepeatFromCurrentTurn() {
@@ -382,6 +502,11 @@
     repeatTurnObservedAt = now;
     repeatResponseObserved = true;
     repeatIdleSince = now;
+    if (!currentTurnFailureSignal() && hasNativeFinalTurnActions() && hasReadyComposerForNextTurn()) {
+      // Adoption path: repeat may be enabled after a turn already completed, so
+      // there is no future aria-live "response complete" mutation to observe.
+      repeatUiCompletionAt = now;
+    }
     requestTick(FINAL_IDLE_STABILITY_MS + 50);
   }
 
@@ -401,6 +526,8 @@
     // segment. This is the key guard against sending between tool phases.
     repeatUiCompletionAt = 0;
     repeatCompletionProven = false;
+    repeatFailureKey = '';
+    invalidateRepeatTurnSignal();
     return true;
   }
 
@@ -430,14 +557,99 @@
   }
 
   function latestAssistantTurn() {
+    // Legacy/older ChatGPT DOM.
     const assistants = document.querySelectorAll('[data-message-author-role="assistant"]');
     const latest = assistants[assistants.length - 1];
-    if (!latest) return null;
-    return latest.closest('article, [data-testid*="conversation-turn"]')
-      || latest.parentElement;
+    if (latest) {
+      return latest.closest('[data-testid^="conversation-turn-"], [data-testid*="conversation-turn"]')
+        || latest.closest('article')
+        || latest.parentElement;
+    }
+
+    // Current ChatGPT DOM: the assistant completion row is a child of the
+    // completed assistant turn container.
+    const row = latestAssistantActionRow();
+    return row?.parentElement || row || null;
+  }
+
+  function currentStreamErrorBanner() {
+    return streamRetryApi?.findStreamError(document, { usable, latestTurn: latestAssistantTurn() }) || null;
+  }
+
+  function currentDeliveryTimeoutBanner() {
+    return streamRetryApi?.findDeliveryTimeout(document, { usable, latestTurn: latestAssistantTurn() }) || null;
+  }
+
+  function currentTurnFailureSignal() {
+    if (currentStreamErrorBanner()) return { state: 'failed', text: 'Error in message stream' };
+    const deliveryTimeout = currentDeliveryTimeoutBanner();
+    if (deliveryTimeout) return { state: 'failed', text: deliveryTimeout.text };
+    const turn = latestAssistantTurn();
+    const candidates = new Set();
+
+    if (turn) {
+      for (const node of turn.querySelectorAll('[role="alert"], [role="status"], [aria-live], button')) {
+        candidates.add(node);
+      }
+    }
+
+    // ChatGPT can render interruption/error notices outside the assistant
+    // message node. Only consider visible live/status UI at or below the latest
+    // turn so an old historical error cannot poison future turns.
+    const turnTop = turn?.getBoundingClientRect().top ?? -Infinity;
+    for (const node of document.querySelectorAll('[role="alert"], [role="status"], [aria-live]')) {
+      if (!usable(node)) continue;
+      if (node.closest?.('[data-message-author-role="assistant"]')) continue;
+      const rect = node.getBoundingClientRect();
+      if (!turn || turn.contains(node) || rect.bottom >= turnTop - 32) candidates.add(node);
+    }
+
+    for (const node of candidates) {
+      if (!usable(node)) continue;
+      if (node.closest?.('[data-message-author-role="assistant"]')) continue;
+      const text = labelOf(node).replace(/\s+/g, ' ').trim();
+      if (!text) continue;
+      if (TURN_INTERRUPTION_RE.test(text)) return { state: 'interrupted', text };
+      if (TURN_FAILURE_RE.test(text)) return { state: 'failed', text };
+    }
+    return null;
+  }
+
+  function completionAuthoritySatisfied(signal) {
+    // The __browserRouter* globals are optional external evidence: this
+    // extension reads them but does not own or produce them. Therefore they
+    // cannot be a mandatory positive authority for Repeat. Treat only fresh
+    // evidence from the current observed turn as a negative veto.
+    if (!signal?.available || signal?.queryFailed) return true;
+
+    const lastFinalTextAt = Number(signal.lastFinalTextAt || 0);
+    const lastToolCallAt = Number(signal.lastToolCallAt || 0);
+    const lastToolResultAt = Number(signal.lastToolResultAt || 0);
+    const latestToolActivityAt = Math.max(
+      Number(signal.latestToolActivityAt || 0),
+      lastToolCallAt,
+      lastToolResultAt,
+    );
+    const latestTransportEventAt = Math.max(lastFinalTextAt, latestToolActivityAt);
+
+    // Ignore stale router state from an older turn/navigation.
+    if (repeatTurnObservedAt > 0 && latestTransportEventAt > 0
+      && latestTransportEventAt < repeatTurnObservedAt) {
+      return true;
+    }
+
+    // Fresh transport evidence may veto an otherwise-complete UI turn.
+    if (Number(signal.sseActive || 0) > 0) return false;
+    if (latestToolActivityAt > 0 && lastFinalTextAt < latestToolActivityAt) return false;
+
+    return true;
   }
 
   function hasNativeFinalTurnActions() {
+    // Current ChatGPT DOM.
+    if (latestAssistantActionRow()) return true;
+
+    // Legacy fallback.
     const turn = latestAssistantTurn();
     if (!turn) return false;
     return !!turn.querySelector(
@@ -466,32 +678,40 @@
     return !hasActiveStopControl();
   }
 
+  function hasFreshUiCompletionSignal() {
+    return repeatUiCompletionAt > 0
+      && repeatAssistantChangedAt > 0
+      && repeatUiCompletionAt >= repeatAssistantChangedAt;
+  }
+
   function hasStrongUiTurnCompletion(now = Date.now()) {
     if (!repeatResponseObserved || repeatAssistantChangedAt <= 0) return false;
-    if (!hasNativeFinalTurnActions()) return false;
+    if (currentTurnFailureSignal()) return false;
+    if (!hasNativeFinalTurnActions() && !hasFreshUiCompletionSignal()) return false;
     if (!hasReadyComposerForNextTurn()) return false;
     return now - repeatAssistantChangedAt >= REPEAT_COMPLETION_SETTLE_MS;
   }
 
-  function repeatTurnComplete(now) {
+  function repeatTurnComplete(now, signal) {
     if (!repeatResponseObserved || repeatAssistantChangedAt <= 0) return false;
+    if (currentTurnFailureSignal()) return false;
     if (repeatIdleSince <= 0 || now - repeatIdleSince < FINAL_IDLE_STABILITY_MS) return false;
     if (!hasStrongUiTurnCompletion(now)) return false;
+    if (!completionAuthoritySatisfied(signal)) return false;
 
     repeatCompletionProven = true;
     return true;
   }
 
   function isStreaming() {
-    // A hidden ChatGPT tab can retain an enabled Stop control after the turn has
-    // actually completed. Only the strong local terminal proof above may bypass it.
-    if (repeatCompletionProven && hasStrongUiTurnCompletion()) return false;
     return hasActiveStopControl();
   }
 
   function findComposer() {
     return document.querySelector('#prompt-textarea')
-      || document.querySelector('textarea#prompt-textarea')
+      || document.querySelector('[contenteditable="true"][role="textbox"]')
+      || document.querySelector('[role="textbox"][aria-multiline="true"]')
+      || document.querySelector('textarea[name="prompt-textarea"]')
       || document.querySelector('[contenteditable="true"][data-id]')
       || document.querySelector('[contenteditable="true"][data-placeholder]');
   }
@@ -499,17 +719,144 @@
   function composerText(editor) {
     if (!editor) return '';
     if (editor.tagName === 'TEXTAREA' || editor.tagName === 'INPUT') return editor.value || '';
+
+    // ProseMirror renders plain multiline input as sibling block nodes. innerText
+    // may insert browser-dependent extra blank lines between <p> nodes, which
+    // made successful writes look different from the requested string.
+    const blocks = [...editor.children];
+    if (blocks.length && blocks.every((node) => /^(P|DIV)$/.test(node.tagName))) {
+      return blocks.map((node) => node.innerText || node.textContent || '').join(String.fromCharCode(10));
+    }
+
     return editor.innerText || editor.textContent || '';
   }
 
+  function normalizedComposerText(value) {
+    const crlf = String.fromCharCode(13) + String.fromCharCode(10);
+    const lf = String.fromCharCode(10);
+    const nbsp = String.fromCharCode(160);
+    return String(value || '').split(nbsp).join(' ').split(crlf).join(lf).trim();
+  }
+
+  function canonicalComposerText(value) {
+    return normalizedComposerText(value).replace(/\s+/g, ' ');
+  }
+
+  function composerTextMatches(editor, expected) {
+    const current = composerText(editor);
+    const exactCurrent = normalizedComposerText(current);
+    const exactExpected = normalizedComposerText(expected);
+    if (exactCurrent === exactExpected) return true;
+    return canonicalComposerText(current) === canonicalComposerText(expected);
+  }
+
+  function selectComposerContents(editor) {
+    const selection = window.getSelection();
+    if (!selection) return false;
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return true;
+  }
+
+  function placeCaretAtComposerEnd(editor) {
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function renderPlainTextIntoContentEditable(editor, text) {
+    const fragment = document.createDocumentFragment();
+    const lines = String(text).split(String.fromCharCode(10));
+    for (const line of lines) {
+      const paragraph = document.createElement('p');
+      if (line) paragraph.appendChild(document.createTextNode(line));
+      else paragraph.appendChild(document.createElement('br'));
+      fragment.appendChild(paragraph);
+    }
+    editor.replaceChildren(fragment);
+    placeCaretAtComposerEnd(editor);
+  }
+
+  async function waitForComposerText(editor, expected, timeoutMs = 1200) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (composerTextMatches(editor, expected)) return true;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return composerTextMatches(editor, expected);
+  }
+
+  async function writeComposerText(editor, text) {
+    if (composerTextMatches(editor, text)) return true;
+
+    editor.focus();
+
+    if (editor.tagName === 'TEXTAREA' || editor.tagName === 'INPUT') {
+      const proto = editor.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+      if (!setter) return false;
+      setter.call(editor, text);
+      editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+      editor.dispatchEvent(new Event('change', { bubbles: true }));
+      return waitForComposerText(editor, text);
+    }
+
+    // ChatGPT's current #prompt-textarea is a ProseMirror EditorView DOM.
+    // Replace in one browser editing operation so ProseMirror observes one
+    // coherent edit rather than a delete/insert race.
+    if (selectComposerContents(editor)) {
+      try {
+        document.execCommand('insertText', false, text);
+      } catch {
+        // Fall through to the DOM-observer path below.
+      }
+      if (await waitForComposerText(editor, text, 450)) return true;
+    }
+
+    // Fallback for Chromium builds where execCommand does not update the
+    // ProseMirror DOM from an extension isolated world. ProseMirror maintains a
+    // DOM observer; mutate to schema-compatible paragraphs, then emit input.
+    try {
+      editor.dispatchEvent(new InputEvent('beforeinput', {
+        bubbles: true,
+        cancelable: true,
+        inputType: 'insertText',
+        data: text,
+      }));
+      renderPlainTextIntoContentEditable(editor, text);
+      editor.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        inputType: 'insertText',
+        data: text,
+      }));
+    } catch {
+      return false;
+    }
+
+    return waitForComposerText(editor, text);
+  }
+
   function findSendButton() {
-    return document.querySelector('#composer-submit-button[data-testid="send-button"]')
-      || document.querySelector('button[data-testid="send-button"]')
-      || document.querySelector('button[aria-label="Send prompt"]')
-      || [...document.querySelectorAll('button')].find((button) => {
-        if (!usable(button) || !enabledButton(button)) return false;
-        return /^send( prompt)?$/i.test((button.getAttribute('aria-label') || '').trim());
-      });
+    const selectors = [
+      '#composer-submit-button[data-testid="send-button"]',
+      'button[data-testid="send-button"]',
+      'button[data-testid*="send" i]',
+      'button[aria-label="Send prompt"]',
+      'button[aria-label="Send"]',
+    ];
+    const candidates = [...document.querySelectorAll(selectors.join(', '))];
+    const visible = candidates.find((button) => usable(button));
+    if (visible) return visible;
+    return [...document.querySelectorAll('button')].find((button) => {
+      if (!usable(button)) return false;
+      return /^send(?: prompt| message)?$/i.test((button.getAttribute('aria-label') || '').trim());
+    }) || null;
   }
 
   function waitForComposer(timeoutMs = COMPOSER_READY_TIMEOUT_MS) {
@@ -567,10 +914,51 @@
     });
   }
 
+  async function sendMessageNow(messageText, strict = false) {
+    const fail = (message) => {
+      if (strict) throw new Error(message);
+      return false;
+    };
+
+    const text = String(messageText || '');
+    const trimmed = normalizedComposerText(text);
+    if (!trimmed) return fail('Message is empty.');
+
+    const editor = await waitForComposer();
+    if (!editor) return fail('ChatGPT composer was not found.');
+
+    const existing = normalizedComposerText(composerText(editor));
+    if (existing && !composerTextMatches(editor, text)) {
+      return fail('ChatGPT composer already contains different user text; refusing to overwrite it.');
+    }
+
+    if (!existing) {
+      const written = await writeComposerText(editor, text);
+      if (!written) {
+        return fail('ChatGPT rejected the programmatic composer write (ProseMirror did not accept the text).');
+      }
+    }
+
+    const sendBtn = await waitForSendButton();
+    if (!sendBtn || !usable(sendBtn) || !enabledButton(sendBtn)) {
+      return fail('ChatGPT composer accepted the text, but the Send button never became enabled.');
+    }
+
+    // For an explicit popup send, the live visible/enabled Send control is the
+    // commit authority. A stale hidden Stop control must not veto the click.
+    sendBtn.click();
+    return true;
+  }
+
   async function sendRepeatMessage() {
     const text = repeatMessage.trim();
     if (!text) return false;
     if (repeatMessageMode === 'count' && repeatMessageSent >= repeatMessageCount) return false;
+    const failure = currentTurnFailureSignal();
+    if (!repeatBootstrapPending && failure) {
+      console.debug('[approval-hint-wasm] repeat message: current turn is not successful; refusing to send', failure);
+      return false;
+    }
     if (isStreaming()) {
       console.debug('[approval-hint-wasm] repeat message: turn still active; refusing to send');
       return false;
@@ -582,32 +970,23 @@
       return false;
     }
 
-    const existing = composerText(editor).trim();
-    if (existing && existing !== text) {
-      console.warn('[approval-hint-wasm] repeat message: composer contains user text; refusing to overwrite it');
+    const existing = normalizedComposerText(composerText(editor));
+    if (existing && !composerTextMatches(editor, text)) {
+      console.debug('[approval-hint-wasm] repeat message: composer contains user text; refusing to overwrite it');
       return false;
     }
 
-    editor.focus();
-    if (editor.tagName === 'TEXTAREA') {
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-      setter?.call(editor, repeatMessage);
-      editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: repeatMessage }));
-      editor.dispatchEvent(new Event('change', { bubbles: true }));
-    } else if (!existing) {
-      const selection = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(editor);
-      selection.removeAllRanges();
-      selection.addRange(range);
-      document.execCommand('delete', false, null);
-      document.execCommand('insertText', false, repeatMessage);
-      editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: repeatMessage }));
+    if (!existing) {
+      const written = await writeComposerText(editor, repeatMessage);
+      if (!written) {
+        console.debug('[approval-hint-wasm] repeat message: ProseMirror rejected composer write; will retry');
+        return false;
+      }
     }
 
     const sendBtn = await waitForSendButton();
     if (!sendBtn || !enabledButton(sendBtn)) {
-      console.warn('[approval-hint-wasm] repeat message: send button not ready; will retry');
+      console.debug('[approval-hint-wasm] repeat message: send button not ready; will retry');
       return false;
     }
 
@@ -616,11 +995,18 @@
     // point so a newly resumed tool/assistant phase cannot race the click.
     if (!repeatBootstrapPending) {
       const latestFingerprint = currentAssistantFingerprint();
+      const turnSignal = await getRepeatTurnSignal(true);
+      const latestFailure = currentTurnFailureSignal();
       if (latestFingerprint !== repeatAssistantFingerprint
+        || latestFailure
         || !repeatCompletionProven
-        || !hasStrongUiTurnCompletion()) {
+        || !hasStrongUiTurnCompletion()
+        || !completionAuthoritySatisfied(turnSignal)) {
         repeatCompletionProven = false;
-        console.debug('[approval-hint-wasm] repeat message: completed turn proof changed before send; refusing to submit');
+        console.debug('[approval-hint-wasm] repeat message: completed turn proof changed before send; refusing to submit', {
+          failure: latestFailure,
+          signal: turnSignal,
+        });
         return false;
       }
     }
@@ -630,6 +1016,11 @@
       return false;
     }
 
+    // Capture the completed-turn baseline BEFORE clicking Send. ChatGPT may
+    // synchronously create the next assistant-turn shell during click(), so
+    // resetting after the click can adopt that future turn and make its later
+    // completion appear unchanged forever.
+    resetRepeatObservation();
     sendBtn.click();
     console.info('[approval-hint-wasm] sent repeat message');
     return true;
@@ -638,6 +1029,66 @@
   async function tick() {
     if (!tabEnabled) return;
     try {
+      if (autoRetry && deliveryTimeoutRetryController) {
+        const timeoutBanner = currentDeliveryTimeoutBanner();
+        const key = streamRetryApi.turnKey(document, location);
+        const lastUserMessage = streamRetryApi.latestUserMessageText(document);
+        const editor = findComposer();
+        const existing = composerText(editor).trim();
+        const ready = !!timeoutBanner
+          && !!lastUserMessage
+          && !!editor
+          && (!existing || existing === lastUserMessage);
+        const decision = deliveryTimeoutRetryController.observe({
+          turnKey: key,
+          visible: !!timeoutBanner,
+          ready,
+          streaming: isStreaming(),
+          now: Date.now(),
+        });
+        if (decision.action === 'wait') requestTick(decision.delayMs + 30);
+        if (decision.action === 'exhausted' && deliveryTimeoutExhaustionLoggedFor !== key) {
+          deliveryTimeoutExhaustionLoggedFor = key;
+          console.warn('[approval-hint-wasm] delivery-timeout resend exhausted; manual intervention required', { attempts: decision.attempts });
+        }
+        if (decision.action === 'resend') {
+          repeatPending = false;
+          repeatCompletionProven = false;
+          const sent = await sendMessageNow(lastUserMessage);
+          deliveryTimeoutRetryController.settle({ success: sent });
+          if (sent) {
+            console.warn('[approval-hint-wasm] resubmitted last user message after delivery timeout', { attempt: decision.attempts });
+          } else {
+            console.warn('[approval-hint-wasm] delivery-timeout resend could not submit; retry remains bounded', { attempt: decision.attempts });
+          }
+          requestTick(1000);
+          return;
+        }
+      }
+      if (autoRetry && streamRetryController) {
+        const banner = currentStreamErrorBanner();
+        const key = streamRetryApi.turnKey(document, location);
+        const decision = streamRetryController.observe({
+          turnKey: key,
+          visible: !!banner,
+          ready: !!banner && enabledButton(banner.button),
+          streaming: isStreaming(),
+          now: Date.now(),
+        });
+        if (decision.action === 'wait') requestTick(decision.delayMs + 30);
+        if (decision.action === 'exhausted' && retryExhaustionLoggedFor !== key) {
+          retryExhaustionLoggedFor = key;
+          console.warn('[approval-hint-wasm] auto retry exhausted; manual intervention required', { attempts: decision.attempts });
+        }
+        if (decision.action === 'click') {
+          repeatPending = false;
+          repeatCompletionProven = false;
+          banner.button.click();
+          console.warn('[approval-hint-wasm] auto retrying message stream error', { attempt: decision.attempts });
+          requestTick(1000);
+          return;
+        }
+      }
       if (repeatMessageEnabled) {
         const assistantChanged = observeAssistantOutput();
         const now = Date.now();
@@ -653,6 +1104,18 @@
 
         let streaming = isStreaming();
         wasStreaming = streaming;
+        const turnFailure = repeatBootstrapPending ? null : currentTurnFailureSignal();
+        if (turnFailure) {
+          repeatPending = false;
+          repeatCompletionProven = false;
+          const failureKey = turnFailure.state + ':' + turnFailure.text;
+          if (failureKey !== repeatFailureKey) {
+            repeatFailureKey = failureKey;
+            console.debug('[approval-hint-wasm] repeat message: waiting on nonterminal/error turn state', turnFailure);
+          }
+        } else {
+          repeatFailureKey = '';
+        }
 
         if (assistantChanged) {
           requestTick(REPEAT_COMPLETION_SETTLE_MS + 50);
@@ -686,29 +1149,38 @@
               if (repeatRestartEnabled) repeatRestartPending = true;
               else repeatMessageEnabled = false;
             }
-            resetRepeatObservation();
             try {
               const response = await runtimeMessage({ type: 'approval:repeat-sent' });
               if (response?.ok && response.state) applyTabState(response.state);
             } catch (error) {
               console.warn('[approval-hint-wasm] repeat count update failed', error);
             }
+          } else {
+            requestTick(TURN_SIGNAL_CACHE_MS + 50);
           }
         }
 
-        if (!repeatPending && repeatTurnComplete(now)) {
+        const turnSignal = repeatResponseObserved && !repeatBootstrapPending && !turnFailure
+          ? await getRepeatTurnSignal(false)
+          : { available: false };
+
+        if (!repeatPending && repeatResponseObserved && !repeatBootstrapPending && !turnFailure) {
+          requestTick(TURN_SIGNAL_CACHE_MS + 50);
+        }
+
+        if (!repeatPending && !turnFailure && repeatTurnComplete(now, turnSignal)) {
           repeatPending = true;
           streaming = isStreaming();
           wasStreaming = streaming;
-          console.info('[approval-hint-wasm] repeat message: final turn completion observed');
+          console.info('[approval-hint-wasm] repeat message: terminal success proven');
         }
 
-        if (repeatPending && !streaming) {
+        if (repeatPending && !turnFailure && !streaming) {
           const cooldownRemaining = REPEAT_COOLDOWN_MS - (now - lastRepeatSent);
           if (cooldownRemaining > 0) requestTick(cooldownRemaining + 10);
         }
 
-        if (repeatPending && !streaming && now - lastRepeatSent > REPEAT_COOLDOWN_MS) {
+        if (repeatPending && !turnFailure && !streaming && now - lastRepeatSent > REPEAT_COOLDOWN_MS) {
           if (repeatRestartPending) {
             repeatPending = false;
             try {
@@ -721,6 +1193,7 @@
               repeatPending = true;
               console.warn('[approval-hint-wasm] repeat cycle restart failed', error);
             }
+            if (repeatPending) requestTick(TURN_SIGNAL_CACHE_MS + 50);
             return;
           }
 
@@ -744,6 +1217,8 @@
             } catch (error) {
               console.warn('[approval-hint-wasm] repeat count update failed', error);
             }
+          } else {
+            requestTick(TURN_SIGNAL_CACHE_MS + 50);
           }
         }
       } else {
@@ -769,7 +1244,7 @@
   }
 
   function mutationTouchesTrackedUi(mutation) {
-    const selector = 'button, [data-message-author-role="assistant"], #prompt-textarea, [contenteditable="true"][data-id], [contenteditable="true"][data-placeholder]';
+    const selector = 'button, .turn-action-controls, [role="alert"], [role="status"], [aria-live], [data-message-author-role="assistant"], #prompt-textarea, [contenteditable="true"][data-id], [contenteditable="true"][data-placeholder]';
     const target = mutation.target?.nodeType === Node.ELEMENT_NODE
       ? mutation.target
       : mutation.target?.parentElement;
@@ -882,6 +1357,8 @@
     repeatCompletionProven = false;
     repeatIdleSince = 0;
     lastRepeatSent = 0;
+    repeatFailureKey = '';
+    invalidateRepeatTurnSignal();
     clearHighlights();
   }
 

@@ -3,8 +3,13 @@
 
   const HEARTBEAT_MS = 10000;
   const MONITOR_THROTTLE_MS = 500;
-  const FALLBACK_SETTLE_MS = 30000;
-  const START_TIMEOUT_MS = 20000;
+  const COMPOSER_READY_TIMEOUT_MS = 20000;
+  const SEND_READY_TIMEOUT_MS = 5000;
+  // ChatGPT tool calls and long model responses can legitimately take more
+  // than a few seconds. Keep an assignment alive long enough for those turns
+  // to produce their final FLEET_STATUS marker.
+  const FALLBACK_SETTLE_MS = 60000;
+  const START_TIMEOUT_MS = 120000;
   const COMPLETION_HANDOFF_ID = '__model_fleet_completion_handoff__';
 
   let registered = false;
@@ -107,14 +112,25 @@
       && el.getAttribute('aria-disabled') !== 'true';
   }
 
-  function isStreaming() {
-    const stopButton = document.querySelector("[data-testid=\"stop-button\"], button[aria-label*=\"stop\" i]");
+  function hasActiveStopControl() {
+    const stopButton = document.querySelector(
+      '#composer-submit-button[data-testid="stop-button"], '
+      + '#composer-submit-button[data-testid*="stop" i], '
+      + '#composer-submit-button[aria-label*="stop" i], '
+      + 'button[data-testid="stop-button"]'
+    );
     return !!stopButton && enabledButton(stopButton);
+  }
+
+  function isStreaming() {
+    return hasActiveStopControl();
   }
 
   function findComposer() {
     return document.querySelector('#prompt-textarea')
-      || document.querySelector('textarea#prompt-textarea')
+      || document.querySelector('[contenteditable="true"][role="textbox"]')
+      || document.querySelector('[role="textbox"][aria-multiline="true"]')
+      || document.querySelector('textarea[name="prompt-textarea"]')
       || document.querySelector('[contenteditable="true"][data-id]')
       || document.querySelector('[contenteditable="true"][data-placeholder]');
   }
@@ -122,41 +138,200 @@
   function composerText(editor) {
     if (!editor) return '';
     if (editor.tagName === 'TEXTAREA' || editor.tagName === 'INPUT') return editor.value || '';
+
+    const blocks = [...editor.children];
+    if (blocks.length && blocks.every((node) => /^(P|DIV)$/.test(node.tagName))) {
+      return blocks.map((node) => node.innerText || node.textContent || '').join(String.fromCharCode(10));
+    }
     return editor.innerText || editor.textContent || '';
   }
 
-  function setComposerText(editor, text) {
-    editor.focus();
-    if (editor.tagName === 'TEXTAREA') {
-      const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
-      descriptor?.set?.call(editor, text);
-      editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
-      editor.dispatchEvent(new Event('change', { bubbles: true }));
-      return;
-    }
+  function normalizedComposerText(value) {
+    const crlf = String.fromCharCode(13) + String.fromCharCode(10);
+    const lf = String.fromCharCode(10);
+    const nbsp = String.fromCharCode(160);
+    return String(value || '').split(nbsp).join(' ').split(crlf).join(lf).trim();
+  }
 
+  function canonicalComposerText(value) {
+    return normalizedComposerText(value).replace(/\s+/g, ' ');
+  }
+
+  function composerTextMatches(editor, expected) {
+    const current = composerText(editor);
+    const exactCurrent = normalizedComposerText(current);
+    const exactExpected = normalizedComposerText(expected);
+    if (exactCurrent === exactExpected) return true;
+    return canonicalComposerText(current) === canonicalComposerText(expected);
+  }
+
+  function selectComposerContents(editor) {
     const selection = window.getSelection();
+    if (!selection) return false;
     const range = document.createRange();
     range.selectNodeContents(editor);
     selection.removeAllRanges();
     selection.addRange(range);
-    document.execCommand('delete', false, null);
-    document.execCommand('insertText', false, text);
-    editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+    return true;
+  }
+
+  function placeCaretAtComposerEnd(editor) {
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function renderPlainTextIntoContentEditable(editor, text) {
+    const fragment = document.createDocumentFragment();
+    const lines = String(text).split(String.fromCharCode(10));
+    for (const line of lines) {
+      const paragraph = document.createElement('p');
+      if (line) paragraph.appendChild(document.createTextNode(line));
+      else paragraph.appendChild(document.createElement('br'));
+      fragment.appendChild(paragraph);
+    }
+    editor.replaceChildren(fragment);
+    placeCaretAtComposerEnd(editor);
+  }
+
+  async function waitForComposerText(editor, expected, timeoutMs = 1200) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (composerTextMatches(editor, expected)) return true;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return composerTextMatches(editor, expected);
+  }
+
+  async function writeComposerText(editor, text) {
+    if (composerTextMatches(editor, text)) return true;
+
+    editor.focus();
+    if (editor.tagName === 'TEXTAREA' || editor.tagName === 'INPUT') {
+      const proto = editor.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+      if (!setter) return false;
+      setter.call(editor, text);
+      editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+      editor.dispatchEvent(new Event('change', { bubbles: true }));
+      return waitForComposerText(editor, text);
+    }
+
+    if (selectComposerContents(editor)) {
+      try {
+        document.execCommand('insertText', false, text);
+      } catch {
+      }
+      if (await waitForComposerText(editor, text, 450)) return true;
+    }
+
+    try {
+      editor.dispatchEvent(new InputEvent('beforeinput', {
+        bubbles: true,
+        cancelable: true,
+        inputType: 'insertText',
+        data: text,
+      }));
+      renderPlainTextIntoContentEditable(editor, text);
+      editor.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        inputType: 'insertText',
+        data: text,
+      }));
+    } catch {
+      return false;
+    }
+    return waitForComposerText(editor, text);
   }
 
   function findSendButton() {
-    return document.querySelector('button[data-testid="send-button"]')
-      || document.querySelector('button[aria-label="Send prompt"]')
-      || [...document.querySelectorAll('button')].find((button) => {
-        if (!usable(button) || !enabledButton(button)) return false;
-        const label = button.getAttribute('aria-label') || '';
-        return /^send( prompt)?$/i.test(label.trim());
+    const selectors = [
+      '#composer-submit-button[data-testid="send-button"]',
+      'button[data-testid="send-button"]',
+      'button[data-testid*="send" i]',
+      'button[aria-label="Send prompt"]',
+      'button[aria-label="Send"]',
+    ];
+    const candidates = [...document.querySelectorAll(selectors.join(', '))];
+    const visible = candidates.find((button) => usable(button));
+    if (visible) return visible;
+    return [...document.querySelectorAll('button')].find((button) => {
+      if (!usable(button)) return false;
+      return /^send(?: prompt| message)?$/i.test((button.getAttribute('aria-label') || '').trim());
+    }) || null;
+  }
+
+  function waitForComposer(timeoutMs = COMPOSER_READY_TIMEOUT_MS) {
+    const immediate = findComposer();
+    if (immediate) return Promise.resolve(immediate);
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (editor) => {
+        if (settled) return;
+        settled = true;
+        observer.disconnect();
+        clearTimeout(timeoutId);
+        resolve(editor);
+      };
+      const observer = new MutationObserver(() => {
+        const editor = findComposer();
+        if (editor) finish(editor);
       });
+      observer.observe(document.documentElement, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['id', 'contenteditable', 'role', 'aria-multiline', 'name', 'data-id', 'data-placeholder'],
+      });
+      const timeoutId = setTimeout(() => finish(null), timeoutMs);
+    });
+  }
+
+  const assistantTurnNodeIds = new WeakMap();
+  let nextAssistantTurnNodeId = 1;
+
+  function isUserTurnNode(node) {
+    let current = node;
+    while (current && current !== document.documentElement) {
+      if (String(current.className || '').includes('user-message')) return true;
+      current = current.parentElement;
+    }
+    return false;
+  }
+
+  function assistantTurnActionRows() {
+    return [...document.querySelectorAll('.turn-action-controls')].filter((row) => {
+      if (isUserTurnNode(row)) return false;
+      return !!row.querySelector(
+        'button[aria-label="Copy"], '
+        + 'button[aria-label*="good response" i], '
+        + 'button[aria-label*="bad response" i]'
+      );
+    });
+  }
+
+  function latestAssistantActionRow() {
+    const rows = assistantTurnActionRows();
+    return rows[rows.length - 1] || null;
   }
 
   function assistantNodes() {
     return document.querySelectorAll("[data-message-author-role=\"assistant\"]");
+  }
+
+  function assistantTurnNodeId(node) {
+    if (!node) return 0;
+    let id = assistantTurnNodeIds.get(node);
+    if (!id) {
+      id = nextAssistantTurnNodeId++;
+      assistantTurnNodeIds.set(node, id);
+    }
+    return id;
   }
 
   function rememberAssistantNodeFromMutations(mutations) {
@@ -182,30 +357,58 @@
         }
       }
     }
-    if (touchedAssistant && active) {
+    if (active && mutations.length) {
+      // Current ChatGPT no longer exposes data-message-author-role on assistant
+      // turns. Any DOM activity may create or update the current turn boundary,
+      // so force one throttled rescan. lastChangeAt is updated only when the
+      // assistant fingerprint actually changes.
+      if (!touchedAssistant) latestAssistantNodeCache = null;
       active.textDirty = true;
-      active.lastChangeAt = Date.now();
     }
   }
 
   function latestAssistantNode(refresh = false) {
     if (!refresh && latestAssistantNodeCache?.isConnected) return latestAssistantNodeCache;
+
+    // Legacy/older ChatGPT DOM.
     const nodes = assistantNodes();
-    latestAssistantNodeCache = nodes[nodes.length - 1] || null;
+    const legacy = nodes[nodes.length - 1] || null;
+    if (legacy) {
+      latestAssistantNodeCache = legacy;
+      return latestAssistantNodeCache;
+    }
+
+    // Current ChatGPT DOM (2026): the action row belongs to a group whose
+    // first child contains semantic transcript blocks. ChatGPT renders the
+    // echoed user prompt first ("You said:") and the actual assistant response
+    // last ("ChatGPT said:"). Parse only the final response block so protocol
+    // examples inside the prompt can never be mistaken for outbound messages.
+    const row = latestAssistantActionRow();
+    const group = row?.parentElement || null;
+    const content = group?.children?.[0] || null;
+    const responseBlocks = content ? [...content.children] : [];
+    latestAssistantNodeCache = responseBlocks[responseBlocks.length - 1]
+      || content
+      || group
+      || row
+      || null;
     return latestAssistantNodeCache;
   }
 
-  function latestAssistantText(refresh = false) {
+  function latestAssistantSnapshot(refresh = false) {
     const node = latestAssistantNode(refresh);
-    if (!node) return "";
-    return String(node.innerText || node.textContent || "").trim();
+    const text = node ? String(node.innerText || node.textContent || "").trim() : "";
+    return {
+      node,
+      text,
+      fingerprint: assistantTurnNodeId(node) + ':' + fingerprint(text),
+    };
   }
 
   function hideTransportResponse(text) {
     const source = normalizeFleetProtocolSource(text);
     if (!/\[\s*FLEET_MESSAGE\b/i.test(source)) return false;
-    const nodes = assistantNodes();
-    const node = nodes[nodes.length - 1];
+    const node = latestAssistantNode(true);
     if (!node) return false;
     const current = String(node.innerText || node.textContent || '').trim();
     if (fingerprint(current) !== fingerprint(String(text || '').trim())) return false;
@@ -239,7 +442,7 @@
     return `${value.length}:${(hash >>> 0).toString(16)}`;
   }
 
-  function waitForSendButton(timeoutMs = 8000) {
+  function waitForSendButton(timeoutMs = SEND_READY_TIMEOUT_MS) {
     const immediate = findSendButton();
     if (immediate && enabledButton(immediate)) return Promise.resolve(immediate);
 
@@ -256,20 +459,37 @@
         const button = findSendButton();
         if (button && enabledButton(button)) finish(button);
       });
-      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["disabled", "aria-disabled", "data-testid", "aria-label"] });
+      observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: ['disabled', 'aria-disabled', 'data-testid', 'aria-label'],
+      });
       const timeoutId = setTimeout(() => finish(null), timeoutMs);
     });
   }
 
   async function injectPrompt(text) {
     if (isStreaming()) throw new Error('ChatGPT tab is already busy');
-    const editor = findComposer();
-    if (!editor) throw new Error('ChatGPT prompt composer was not found');
-    if (composerText(editor).trim()) throw new Error('ChatGPT composer is not empty; refusing to overwrite user text');
 
-    setComposerText(editor, text);
+    const editor = await waitForComposer();
+    if (!editor) throw new Error('ChatGPT prompt composer was not found');
+
+    const existing = normalizedComposerText(composerText(editor));
+    if (existing && !composerTextMatches(editor, text)) {
+      throw new Error('ChatGPT composer already contains different user text; refusing to overwrite it');
+    }
+
+    if (!existing) {
+      const written = await writeComposerText(editor, text);
+      if (!written) throw new Error('ChatGPT rejected the programmatic composer write');
+    }
+
     const sendButton = await waitForSendButton();
-    if (!sendButton) throw new Error('ChatGPT send button did not become available');
+    if (!sendButton || !usable(sendButton) || !enabledButton(sendButton)) {
+      throw new Error('ChatGPT composer accepted the text, but the Send button never became enabled');
+    }
     sendButton.click();
   }
 
@@ -436,12 +656,14 @@
 
     const elapsed = Date.now() - active.sentAt;
     if (active.textDirty) {
-      const text = latestAssistantText();
-      const currentFingerprint = fingerprint(text);
+      const snapshot = latestAssistantSnapshot(true);
+      const text = snapshot.text;
+      const currentFingerprint = snapshot.fingerprint;
       active.textDirty = false;
       if (currentFingerprint !== active.lastFingerprint) {
         active.lastFingerprint = currentFingerprint;
         active.lastText = text;
+        active.lastChangeAt = Date.now();
         active.responseChanged = currentFingerprint !== active.baselineFingerprint && text.trim().length > 0;
         active.explicitTerminal = active.responseChanged && hasFleetTerminalMarker(text);
         if (active.responseChanged) {
@@ -487,7 +709,8 @@
     if (active) throw new Error(`worker already has assignment ${active.assignment.id}`);
     if (pendingCompletion) throw new Error(`worker is recovering completion ${pendingCompletion.assignmentId}`);
 
-    const baselineText = latestAssistantText(true);
+    const baseline = latestAssistantSnapshot(true);
+    const baselineText = baseline.text;
     const sentAt = Date.now();
     await injectPrompt(assignment.prompt);
     latestAssistantNodeCache = null;
@@ -496,8 +719,8 @@
     active = {
       assignment,
       sentAt,
-      baselineFingerprint: fingerprint(baselineText),
-      lastFingerprint: fingerprint(baselineText),
+      baselineFingerprint: baseline.fingerprint,
+      lastFingerprint: baseline.fingerprint,
       lastText: baselineText,
       lastChangeAt: sentAt,
       sawStreaming: false,

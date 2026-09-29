@@ -1,0 +1,136 @@
+# Model Fleet message-dispatch problem
+
+## Symptom
+
+Messages sent from the Model Fleet Control pane through the Natural-Language Bus are accepted by the extension, but delivery to a ChatGPT worker is unreliable:
+
+- Some messages remain `QUEUED` even though the selected worker appears `IDLE`.
+- A message can become `RUNNING`, while the ChatGPT tab does not visibly complete the turn.
+- Later messages to the same worker remain queued behind the running assignment.
+- Older assignments can reappear after dispatch is resumed because they were still stored as queued work.
+- The per-worker `Cancel / clear` control was difficult to use because it appeared and disappeared during state updates.
+
+## Evidence
+
+The worker-to-worker routing tests succeeded, and the ChatGPT tab’s popup send action worked. Therefore the problem is specifically in the operator-message dispatch and assignment-completion path, not the basic ChatGPT composer or semantic message storage.
+
+Observed state examples:
+
+- `operator → W-1043671400: hi` became `RUNNING`.
+- `operator → W-1043671400: tes3` remained `QUEUED` behind it.
+- The control pane reported healthy workers and enabled dispatch while queued messages were present.
+
+## Likely failure boundaries
+
+1. The operator send path originally started `schedule()` fire-and-forget and discarded scheduler errors.
+2. A failed or delayed worker activation could therefore leave a message looking permanently queued without an explanation in the UI.
+3. Once an assignment was running, completion depended on the worker-side DOM monitor observing a changed assistant response and its terminal `FLEET_STATUS` marker.
+4. The original worker monitor timeout was too short for slow model/tool turns.
+
+## Changes made
+
+- Added a stable **Stop & flush worker work** action that pauses dispatch, cancels active assignments, and cancels queued worker messages.
+- Scheduler failures are now recorded in the Journal as `schedule.failed`.
+- Operator sends wait through the scheduler reservation phase and retry admission several times.
+- Increased the worker response-start timeout from 20 seconds to 2 minutes.
+- Increased the quiet-response fallback from 30 seconds to 1 minute.
+
+## Remaining verification
+
+Reload the unpacked extension, clear any stale running assignment with **Stop & flush worker work**, then click **Resume dispatch** before sending one fresh message. **Stop & flush worker work intentionally leaves dispatch paused.** Confirm that:
+
+1. The target ChatGPT tab visibly receives and submits the prompt.
+2. The assignment changes from `RUNNING` to `DONE`.
+3. The next queued message is then dispatched.
+4. If dispatch fails, the Journal contains the concrete `schedule.failed` or `dispatch.failed` reason.
+
+
+## Root cause fixed
+
+The fleet worker was using a legacy-only assistant selector:
+
+- fleet-worker.js only observed data-message-author-role=assistant.
+- Current ChatGPT DOM uses .turn-action-controls as the durable completed-assistant-turn boundary; content.js already handled this, but the fleet worker did not.
+- Therefore the prompt could send successfully while the fleet monitor never observed the new assistant turn, leaving the assignment RUNNING.
+- The old response fingerprint also used only text, so two consecutive assistant turns with identical text were indistinguishable.
+- The old streaming selector matched any enabled button whose aria-label contained stop, which could falsely suppress timeout recovery.
+
+Fix:
+
+- Fleet completion now uses the same current-DOM assistant boundary as content.js, with the legacy role selector retained as fallback.
+- New-turn identity is part of the fingerprint, so identical response text on a new turn is still detected.
+- DOM mutations trigger a throttled rescan, while quiet time advances only when assistant output actually changes.
+- Streaming detection is restricted to ChatGPT's composer stop control.
+- Added tests/fleet-worker-turn-detector.test.cjs to lock these invariants.
+
+
+## Live failure found after resume
+
+Chromium extension storage exposed the exact repeated transport error:
+
+Error: Error: ChatGPT prompt composer was not found
+
+The worker wake and bridge path were succeeding. fleet-worker.js had an older composer adapter than content.js and did not recognize the current contenteditable role=textbox / aria-multiline ChatGPT composer.
+
+The failure handler also immediately requeued the same targeted message and called the scheduler again, creating a tight retry storm. dispatch.failed stored the real error in event.detail.error, but the control pane discarded that detail, so the UI hid the root cause.
+
+Fix:
+
+- Fleet worker now uses the current composer selectors, ProseMirror-aware write/verification path, and current send-button selectors already proven in content.js.
+- A dispatch transport failure now fail-closes the target worker as blocked while leaving its targeted message queued.
+- Re-registering/reconciling the worker clears the block after the bridge is healthy.
+- Public snapshots preserve blocked instead of incorrectly projecting it as idle.
+- Journal renders detail.error, and the Exceptions panel shows lastDispatchError.
+
+
+## Live write-verifier mismatch
+
+After the current composer selectors were deployed, a live dispatch reached the real ProseMirror editor. The assignment text was present in the composer and the Send button was enabled, but the worker reported "ChatGPT rejected the programmatic composer write".
+
+This was a verifier false negative: ProseMirror's rendered whitespace/newline representation differed from the source string, while content and token order were preserved.
+
+Fix:
+
+- Both content.js and fleet-worker.js now use the same two-level composer comparison.
+- Exact normalized text remains the first authority.
+- If exact formatting differs, a canonical comparison collapses whitespace only; punctuation, characters, and token order must still match.
+- Existing non-matching user text is still never overwritten.
+
+
+## Live response-boundary contamination
+
+The first successful end-to-end dispatch exposed a final parsing defect. Current ChatGPT renders the completed turn group as separate transcript blocks:
+
+- first block: "You said:" plus the submitted fleet prompt;
+- last block: "ChatGPT said:" plus the actual assistant response;
+- sibling: .turn-action-controls.
+
+The fleet monitor was reading the whole group. Because the fleet prompt itself documents an example FLEET_MESSAGE to W-123, the parser treated that prompt example as real assistant output and routed a false undeliverable message.
+
+Fix:
+
+- Current-DOM response capture now selects only the final semantic response block before the action controls.
+- Prompt echoes are excluded before parseFleetOutput.
+- Legacy data-message-author-role=assistant remains the fallback for older ChatGPT DOM.
+
+
+## Final live proof
+
+After the response-boundary fix was loaded into the live Chromium worker, a fresh semantic message was queued as M-208 with body:
+
+Reply exactly with: FLEET_BOUNDARY_FINAL_OK
+
+Observed end-to-end transition:
+
+- M-208 queued.
+- A-M-M-208-330518 dispatch attempted.
+- Worker W-1043671402 woke in its persistent window.
+- Dispatch was accepted.
+- M-208 completed.
+- Captured response was exactly the current assistant response block: ChatGPT said / FLEET_BOUNDARY_FINAL_OK.
+- assignment.parsed reported 0 semantic messages.
+- nextMessage remained 209 and no message with id greater than M-208 existed, proving the prompt's documented FLEET_MESSAGE to W-123 example was not routed.
+
+Final invariant:
+
+QUEUED -> DISPATCHED -> ACCEPTED -> DONE, with no prompt-echo contamination and no retry storm.

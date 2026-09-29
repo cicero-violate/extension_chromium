@@ -7,7 +7,7 @@
 
   const $ = (id) => document.getElementById(id);
   const els = {
-    healthDot: $('healthDot'), healthText: $('healthText'), pauseAll: $('pauseAll'), killAll: $('killAll'),
+    healthDot: $('healthDot'), healthText: $('healthText'), pauseAll: $('pauseAll'), stopFlushStale: $('stopFlushStale'), killAll: $('killAll'),
     goalInput: $('goalInput'), saveGoal: $('saveGoal'), workerMetric: $('workerMetric'), taskMetric: $('taskMetric'), messageMetric: $('messageMetric'),
     generation: $('generation'), registerAll: $('registerAll'), refresh: $('refresh'), status: $('status'),
     concurrency: $('concurrency'), concurrencyValue: $('concurrencyValue'), authorityValue: $('authorityValue'),
@@ -234,7 +234,14 @@
 
   function renderJournal() {
     const events = (snapshot?.journal || []).slice(-60).reverse();
-    els.journal.innerHTML = events.length ? events.map((event) => `<div class="event"><div class="event-time">${formatTime(event.at)}</div><div class="event-text"><strong>${escapeHtml(event.type)}</strong> · ${escapeHtml(event.text)}</div></div>`).join('') : '<div class="empty">No events.</div>';
+    els.journal.innerHTML = events.length ? events.map((event) => {
+      const error = typeof event.detail?.error === 'string' && event.detail.error.trim()
+        ? '<div class="small" style="margin-top:4px">error: ' + escapeHtml(compact(event.detail.error, 500)) + '</div>'
+        : '';
+      return '<div class="event"><div class="event-time">' + formatTime(event.at)
+        + '</div><div class="event-text"><strong>' + escapeHtml(event.type)
+        + '</strong> · ' + escapeHtml(event.text) + error + '</div></div>';
+    }).join('') : '<div class="empty">No events.</div>';
   }
 
   function computeInvariants() {
@@ -271,7 +278,9 @@
     for (const worker of workers()) {
       const age = worker.heartbeatAt ? Math.round((snapshot.serverNow - worker.heartbeatAt) / 1000) : Infinity;
       if (age > HEARTBEAT_STALE_SECONDS) exceptions.push(`${worker.id} heartbeat stale (${Number.isFinite(age) ? `${age}s` : 'never'})`);
-      if (worker.status === 'blocked') exceptions.push(`${worker.id} is blocked`);
+      if (worker.status === 'blocked') {
+        exceptions.push(worker.id + ' is blocked' + (worker.lastDispatchError ? ': ' + worker.lastDispatchError : ''));
+      }
     }
     for (const task of tasks()) {
       if (task.status === 'blocked') exceptions.push(`${task.id} is blocked${task.statusNote ? `: ${task.statusNote}` : ''}`);
@@ -339,7 +348,23 @@
   els.concurrency.addEventListener('change', () => send('fleet:update-policy', { patch: { maxConcurrency: Number(els.concurrency.value) } }).then((response) => { snapshot = normalizeSnapshot(response.snapshot); render(); setStatus('Concurrency updated'); }).catch((error) => setStatus(String(error), true)));
   els.pauseAll.addEventListener('click', () => {
     if (!snapshot) return;
-    send('fleet:update-policy', { patch: { paused: !snapshot.policy.paused } }).then((response) => { snapshot = normalizeSnapshot(response.snapshot); render(); }).catch((error) => setStatus(String(error), true));
+    send('fleet:update-policy', { patch: { paused: !snapshot.policy.paused } }).then((response) => {
+      snapshot = normalizeSnapshot(response.snapshot);
+      render();
+      setStatus(snapshot.policy.paused ? 'Dispatch paused' : 'Dispatch resumed; queued work is now eligible');
+    }).catch((error) => setStatus(String(error), true));
+  });
+  els.stopFlushStale.addEventListener('click', () => {
+    if (!window.confirm('Pause dispatch, cancel active assignments, and cancel all queued worker messages?')) return;
+    els.stopFlushStale.disabled = true;
+    send('fleet:stop-and-flush-stale').then((response) => {
+      snapshot = normalizeSnapshot(response.snapshot);
+      render();
+      const warning = response.cancellationWarnings ? ` (${response.cancellationWarnings} warning(s))` : '';
+      setStatus(`Stopped ${response.cancelledActive} active assignment(s); cancelled ${response.cancelledQueued} stale queued message(s)${warning}. Dispatch remains paused; click Resume dispatch before sending new work.`);
+    }).catch((error) => setStatus(String(error), true)).finally(() => {
+      els.stopFlushStale.disabled = false;
+    });
   });
   els.killAll.addEventListener('click', () => {
     if (!snapshot) return;
@@ -373,7 +398,15 @@
       snapshot = normalizeSnapshot(response.snapshot);
       els.messageBody.value = '';
       render();
-      setStatus(`Queued ${response.message.id}`);
+      const paused = snapshot.policy.paused === true;
+      setStatus(response.scheduleError
+        ? `Queued ${response.message.id}; scheduler error recorded in Journal`
+        : (response.message.status === 'running'
+          ? `Dispatching ${response.message.id}`
+          : (paused
+            ? `Queued ${response.message.id}; dispatch is paused — click Resume dispatch`
+            : `Queued ${response.message.id}`)),
+      !!response.scheduleError || paused);
     }).catch((error) => setStatus(String(error), true));
   });
 

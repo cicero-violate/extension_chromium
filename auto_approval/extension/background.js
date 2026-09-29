@@ -3,6 +3,7 @@
 const TAB_STATE_PREFIX = 'approvalTab:';
 const FLEET_STATE_KEY = 'modelFleetState:v1';
 const SUPPORTED_URL = /^https:\/\/(?:chatgpt\.com|chat\.openai\.com)\//;
+const APPROVAL_CONTENT_FILES = Object.freeze(['stream-retry.js', 'content.js']);
 const MAX_JOURNAL = 250;
 const MAX_MESSAGES = 250;
 const MAX_RESULT_CHARS = 16000;
@@ -18,6 +19,7 @@ const DEFAULT_TAB_STATE = Object.freeze({
   enabled: false,
   autoApprove: true,
   autoScroll: true,
+  autoRetry: false,
   repeatMessageEnabled: false,
   repeatMessage: '',
   repeatMessageMode: 'forever',
@@ -76,6 +78,7 @@ function normalizeTabState(value = {}) {
     enabled: value.enabled === true,
     autoApprove: value.autoApprove !== false,
     autoScroll: value.autoScroll !== false,
+    autoRetry: value.autoRetry === true,
     repeatMessageEnabled: value.repeatMessageEnabled === true && (!repeatLimitReached || repeatRestartPending),
     repeatMessage: typeof value.repeatMessage === 'string' ? value.repeatMessage : '',
     repeatMessageMode,
@@ -103,9 +106,10 @@ async function setTabState(tabId, patch) {
   await chrome.storage.session.set({ [key]: next });
   await updateBadge(tabId, next);
   try {
+    await ensureApprovalBridge(tabId);
     await chrome.tabs.sendMessage(tabId, { type: 'approval:tab-state-changed', state: next });
   } catch {
-    // Content script may not exist yet.
+    // Unsupported, closing, or not-yet-ready tabs stay safely disabled in-page.
   }
   return next;
 }
@@ -234,7 +238,9 @@ function publicSnapshot(state) {
       title: live?.title || worker.title,
       url: live?.url || worker.url,
       windowId: Number.isInteger(live?.windowId) ? live.windowId : worker.windowId,
-      status: worker.currentAssignmentId ? worker.status : (busy ? "waiting" : "idle"),
+      status: worker.currentAssignmentId
+        ? worker.status
+        : (worker.status === 'blocked' ? 'blocked' : (busy ? "waiting" : "idle")),
     };
   }
   return {
@@ -299,6 +305,62 @@ async function supportedTab(tabId) {
   }
 }
 
+async function ensureApprovalBridge(tabId) {
+  if (!Number.isInteger(tabId)) throw new Error('invalid tab id');
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, { type: 'approval:bridge-ping' });
+    if (response?.ok) return response;
+  } catch {
+    // A reload/update invalidates old content-script extension contexts.
+  }
+
+  const tab = await supportedTab(tabId);
+  if (!tab) throw new Error('approval bridge target is not a supported ChatGPT tab');
+
+  // A reloaded unpacked extension can leave this isolated-world bootstrap
+  // sentinel behind after the old extension context is invalidated. Clear it
+  // before reinjection so content.js cannot incorrectly short-circuit.
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      delete globalThis.__approvalHintWasmContentV1;
+    },
+  });
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: APPROVAL_CONTENT_FILES,
+  });
+
+  const response = await chrome.tabs.sendMessage(tabId, { type: 'approval:bridge-ping' });
+  if (!response?.ok) throw new Error('approval bridge did not answer ping after reinjection');
+  return response;
+}
+
+async function ensureApprovalBridgesForSupportedTabs() {
+  const tabs = await chrome.tabs.query({});
+  const supported = tabs.filter((tab) => Number.isInteger(tab.id) && SUPPORTED_URL.test(tab.url || ''));
+  await Promise.allSettled(supported.map((tab) => ensureApprovalBridge(tab.id)));
+}
+
+async function sendApprovalMessage(tabId, text) {
+  if (!Number.isInteger(tabId)) throw new Error('invalid tab id');
+  const body = String(text || '');
+  if (!body.trim()) throw new Error('message is empty');
+
+  // Explicit sends are routed through the background authority so every send
+  // proves or repairs the content-script bridge immediately before delivery.
+  await ensureApprovalBridge(tabId);
+  const response = await chrome.tabs.sendMessage(tabId, {
+    type: 'approval:send-message-now',
+    text: body,
+  });
+  if (!response?.ok) {
+    throw new Error(response?.error || 'Message could not be sent from the current ChatGPT state.');
+  }
+  return { sent: true };
+}
+
 async function readRepeatTurnSignal(tabId) {
   if (!Number.isInteger(tabId)) return { available: false };
   try {
@@ -319,17 +381,26 @@ async function readRepeatTurnSignal(tabId) {
         const lastToolCallAt = Number(window.__browserRouterLastToolCallAt || 0);
         const lastToolResultAt = Number(window.__browserRouterLastToolResultAt || 0);
         const latestToolActivityAt = Math.max(lastToolCallAt, lastToolResultAt);
+        const sseActive = Number(capture?.active || 0);
+        const messageStreamComplete = window.__browserRouterMessageStreamComplete === true;
+        const messageCompleteObserved = window.__browserRouterMessageCompleteObserved === true;
+        const postToolFinalText = lastFinalTextAt > 0 && lastFinalTextAt >= latestToolActivityAt;
+        const terminalSuccess = sseActive === 0
+          && messageStreamComplete
+          && messageCompleteObserved
+          && postToolFinalText;
 
         return {
           available: true,
-          sseActive: Number(capture?.active || 0),
-          messageStreamComplete: window.__browserRouterMessageStreamComplete === true,
-          messageCompleteObserved: window.__browserRouterMessageCompleteObserved === true,
+          sseActive,
+          messageStreamComplete,
+          messageCompleteObserved,
           lastFinalTextAt,
           lastToolCallAt,
           lastToolResultAt,
           latestToolActivityAt,
-          postToolFinalText: lastFinalTextAt >= latestToolActivityAt,
+          postToolFinalText,
+          terminalSuccess,
         };
       },
     });
@@ -629,6 +700,8 @@ function reconcileBridgeRuntimeState(state, workerId, bridgeState = {}) {
     worker.busy = false;
   }
   worker.lastDispatchError = '';
+  worker.dispatchFailureCount = 0;
+  worker.lastDispatchFailureAt = 0;
   worker.heartbeatAt = now();
 }
 
@@ -992,16 +1065,22 @@ function chooseDispatches(state) {
 }
 
 async function failDispatch(dispatch, error) {
-  await mutateFleet((state) => {
+  const errorText = String(error);
+  const { result } = await mutateFleet((state) => {
     const worker = state.workers[dispatch.workerId];
+    const blockWorker = !state.policy.paused && state.policy.authorityEnabled;
     if (worker?.currentAssignmentId === dispatch.assignment.id) {
       worker.currentAssignmentId = null;
       worker.currentTaskId = null;
       worker.currentMessageId = null;
-      worker.status = worker.enabled ? 'idle' : 'offline';
+      worker.status = worker.enabled ? (blockWorker ? 'blocked' : 'idle') : 'offline';
       worker.lifecycle = worker.enabled ? 'idle' : 'offline';
       worker.busy = false;
-      worker.lastDispatchError = String(error);
+      worker.warmIdleSince = 0;
+      worker.warmIdleUntil = 0;
+      worker.lastDispatchError = errorText;
+      worker.dispatchFailureCount = Number(worker.dispatchFailureCount || 0) + 1;
+      worker.lastDispatchFailureAt = now();
     }
     if (dispatch.assignment.kind === 'task') {
       const task = state.tasks[dispatch.assignment.taskId];
@@ -1009,16 +1088,27 @@ async function failDispatch(dispatch, error) {
         task.status = 'pending';
         task.assignedWorkerId = null;
         task.assignmentId = null;
+        task.statusNote = 'dispatch failed on ' + dispatch.workerId + ': ' + errorText;
       }
     } else {
       const message = state.messages.find((m) => m.id === dispatch.assignment.messageId);
       if (message?.assignmentId === dispatch.assignment.id) {
         message.status = 'queued';
         message.assignmentId = null;
+        message.lastDispatchError = errorText;
+        message.dispatchFailureCount = Number(message.dispatchFailureCount || 0) + 1;
+        if (blockWorker) {
+          message.lastDeferredReason = 'target worker blocked after dispatch failure: ' + errorText;
+        }
       }
     }
-    appendJournal(state, 'dispatch.failed', `${dispatch.assignment.id} failed`, { error: String(error) });
+    appendJournal(state, 'dispatch.failed', dispatch.assignment.id + ' failed: ' + errorText, {
+      error: errorText,
+      workerBlocked: !!worker && worker.status === 'blocked',
+    });
+    return { workerBlocked: !!worker && worker.status === 'blocked' };
   });
+  return result || { workerBlocked: false };
 }
 
 async function journalDeferredMessages(preview, reason) {
@@ -1067,6 +1157,9 @@ async function dispatchReserved(dispatch) {
       if (worker?.currentAssignmentId === dispatch.assignment.id) {
         worker.status = 'running';
         worker.lifecycle = 'running';
+        worker.lastDispatchError = '';
+        worker.dispatchFailureCount = 0;
+        worker.lastDispatchFailureAt = 0;
       }
       appendJournal(state, 'dispatch.accepted', `${dispatch.assignment.id} accepted by ${dispatch.workerId}`, {
         workerId: dispatch.workerId,
@@ -1074,8 +1167,10 @@ async function dispatchReserved(dispatch) {
       });
     });
   } catch (error) {
-    await failDispatch(dispatch, error);
-    await settleWorkerIdle(dispatch.workerId, 'dispatch failure').catch(() => {});
+    const failure = await failDispatch(dispatch, error);
+    if (!failure?.workerBlocked) {
+      await settleWorkerIdle(dispatch.workerId, 'dispatch failure').catch(() => {});
+    }
   } finally {
     // A transport path must never hold up admission for unrelated worker windows.
     schedule().catch(() => {});
@@ -1130,6 +1225,20 @@ async function schedule() {
       const latest = await loadFleetState();
       await journalDeferredMessages(latest, 'no dispatch selected after eligibility check');
     }
+  } catch (error) {
+    // Callers intentionally kick the scheduler fire-and-forget. Preserve the
+    // error in the fleet journal so a queued message cannot fail silently.
+    try {
+      await mutateFleet((state) => {
+        appendJournal(state, 'schedule.failed', 'Scheduler failed while admitting queued work', {
+          error: String(error),
+        });
+      });
+    } catch {
+      // Do not replace the original scheduler error if persistence is also
+      // unavailable.
+    }
+    throw error;
   } finally {
     scheduling = false;
     if (schedulePending) {
@@ -1144,6 +1253,17 @@ async function schedule() {
       console.warn('[model-fleet] reserved dispatch transport failed unexpectedly', dispatch.assignment.id, error);
     });
   }
+}
+
+async function scheduleMessageUntilAdmitted(messageId, maxAttempts = 5) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    await schedule();
+    const state = await loadFleetState();
+    const message = state.messages.find((item) => item.id === messageId);
+    if (!message || message.status !== 'queued') return message || null;
+    if (attempt + 1 < maxAttempts) await delay(250);
+  }
+  return (await loadFleetState()).messages.find((item) => item.id === messageId) || null;
 }
 
 async function completeAssignment(senderTabId, payload) {
@@ -1219,7 +1339,9 @@ async function flushWorkerHeartbeats() {
       worker.windowId = Number.isInteger(heartbeat.windowId) ? heartbeat.windowId : worker.windowId;
       worker.heartbeatAt = Math.max(Number(worker.heartbeatAt || 0), heartbeat.at);
       worker.busy = heartbeat.busy === true;
-      if (!worker.currentAssignmentId) worker.status = worker.busy ? "waiting" : "idle";
+      if (!worker.currentAssignmentId && worker.status !== 'blocked') {
+        worker.status = worker.busy ? "waiting" : "idle";
+      }
       if (wasBusy && !worker.busy) scheduleNeeded = true;
       heartbeatDelta[workerId] = { heartbeatAt: worker.heartbeatAt, busy: worker.busy, status: worker.status };
       touched = true;
@@ -1507,6 +1629,54 @@ async function cancelWorkerDispatch(workerId) {
   return { snapshot: publicSnapshot(state), assignmentId, released: !!result, transportError };
 }
 
+async function stopAndFlushStaleWork() {
+  const { result: initial } = await mutateFleet((state) => {
+    state.policy.paused = true;
+    const activeWorkerIds = Object.values(state.workers)
+      .filter((worker) => worker.currentAssignmentId)
+      .map((worker) => worker.id);
+    let cancelledQueued = 0;
+    for (const message of state.messages) {
+      if (message.status !== 'queued' || message.toWorkerId === 'operator') continue;
+      message.status = 'cancelled';
+      message.completedAt = now();
+      message.lastDeferredReason = 'stale queued worker message';
+      cancelledQueued += 1;
+      appendJournal(state, 'message.cancelled', `${message.id} cancelled: ${message.lastDeferredReason}`);
+    }
+    appendJournal(state, 'authority.stale_work_stop', 'Paused dispatch and flushed active and queued worker work', {
+      activeAssignments: activeWorkerIds.length,
+      cancelledQueued,
+    });
+    return { activeWorkerIds, cancelledQueued };
+  });
+
+  let cancelledActive = 0;
+  let cancellationWarnings = 0;
+  for (const workerId of initial.activeWorkerIds) {
+    try {
+      const result = await cancelWorkerDispatch(workerId);
+      if (result.released) cancelledActive += 1;
+      if (result.transportError) cancellationWarnings += 1;
+    } catch (error) {
+      cancellationWarnings += 1;
+      await mutateFleet((state) => {
+        appendJournal(state, 'assignment.cancel.failed', `${workerId} stale assignment could not be cancelled`, {
+          error: String(error),
+        });
+      });
+    }
+  }
+
+  const state = await loadFleetState();
+  return {
+    snapshot: publicSnapshot(state),
+    cancelledActive,
+    cancelledQueued: initial.cancelledQueued,
+    cancellationWarnings,
+  };
+}
+
 async function killAuthority() {
   const { state, result: tabs } = await mutateFleet((state) => {
     state.policy.authorityEnabled = false;
@@ -1536,6 +1706,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   };
 
+  if (message.type === 'approval:send-message-now') {
+    return reply(sendApprovalMessage(message.tabId, message.text));
+  }
   if (message.type === 'approval:get-own-tab-state') {
     const tabId = sender.tab?.id;
     return reply(getTabState(tabId).then((state) => ({ state, supported: Number.isInteger(tabId) })));
@@ -1551,7 +1724,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message.type === 'approval:set-tab-state') {
     const tabId = message.tabId;
-    return reply(setTabState(tabId, message.patch || {}).then(async (state) => ({ state, supported: !!(await supportedTab(tabId)) })));
+    return reply(setTabState(tabId, message.patch || {}).then(async (state) => {
+      const tab = await supportedTab(tabId);
+      if (tab) {
+        // UI-originated state changes are not successful until the live page
+        // bridge is proven and the exact state has reached that bridge.
+        await ensureApprovalBridge(tabId);
+        await chrome.tabs.sendMessage(tabId, { type: 'approval:tab-state-changed', state });
+      }
+      return { state, supported: !!tab };
+    }));
   }
   if (message.type === 'approval:repeat-sent') {
     const tabId = sender.tab?.id;
@@ -1657,9 +1839,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       if (!queued.body) throw new Error('message body is required');
       return queued;
-    }).then(({ state, result: queued }) => {
-      schedule().catch(() => {});
-      return { message: queued, snapshot: publicSnapshot(state) };
+    }).then(async ({ result: queued }) => {
+      let scheduleError = null;
+      try {
+        // Wait through reservation, but not worker activation/acknowledgement.
+        // This makes the response reflect whether the target was admitted.
+        await scheduleMessageUntilAdmitted(queued.id);
+      } catch (error) {
+        scheduleError = String(error);
+      }
+      return { message: queued, scheduleError, snapshot: publicSnapshot(await loadFleetState()) };
     }));
   }
   if (message.type === 'fleet:update-policy') {
@@ -1680,6 +1869,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message.type === 'fleet:cancel-worker-dispatch') {
     return reply(cancelWorkerDispatch(String(message.workerId || '').trim()));
+  }
+  if (message.type === 'fleet:stop-and-flush-stale') {
+    return reply(stopAndFlushStaleWork());
   }
   if (message.type === 'fleet:kill-authority') {
     return reply(killAuthority().then((snapshot) => ({ snapshot })));
@@ -1753,10 +1945,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (!Object.prototype.hasOwnProperty.call(changeInfo, 'url') && changeInfo.status !== 'complete') return;
   updateBadge(tabId).catch(() => {});
+  if (changeInfo.status === 'complete') ensureApprovalBridge(tabId).catch(() => {});
 });
 
 chrome.runtime.onInstalled.addListener(() => {
   normalizeIdleWorkers('extension reload migration').catch(() => {});
+  ensureApprovalBridgesForSupportedTabs().catch(() => {});
 });
 
 chrome.runtime.onStartup.addListener(() => {
@@ -1765,3 +1959,4 @@ chrome.runtime.onStartup.addListener(() => {
 
 // Also run once whenever the MV3 service worker itself is loaded/reloaded.
 cleanupLegacySleepTabs('service worker migration').catch(() => {});
+ensureApprovalBridgesForSupportedTabs().catch(() => {});
