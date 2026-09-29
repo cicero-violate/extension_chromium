@@ -22,9 +22,14 @@ test('message sections expose newest and oldest sort controls', () => {
   assert.match(js, /direction === 'oldest'/);
 });
 
-test('operator inbox and semantic traffic remain disjoint projections', () => {
-  assert.match(js, /message\.toWorkerId === 'operator'/);
-  assert.match(js, /message\.toWorkerId !== 'operator'/);
+test('operator inbox contains both sent and received operator messages', () => {
+  assert.match(js, /function involvesOperator\(message\)/);
+  assert.match(js, /message\?\.toWorkerId === 'operator' \|\| message\?\.from === 'operator'/);
+  assert.match(js, /list\.filter\(\(message\) => involvesOperator\(message\)\)/);
+});
+
+test('semantic traffic excludes messages involving the operator', () => {
+  assert.match(js, /list\.filter\(\(message\) => !involvesOperator\(message\)\)/);
 });
 
 

@@ -180,6 +180,10 @@
     return `${from} → ${to}`;
   }
 
+  function involvesOperator(message) {
+    return message?.toWorkerId === 'operator' || message?.from === 'operator';
+  }
+
   function renderMessageCard(message, operatorStyle = false, bodyMax = 700) {
     const status = safeStatus(message.status, message.toWorkerId === 'operator' ? 'delivered' : 'unknown');
     const statusClass = status === 'running' ? 'running' : status === 'done' || status === 'delivered' ? 'done' : status === 'cancelled' ? 'blocked' : 'pending';
@@ -280,8 +284,8 @@
   function renderMessages() {
     const list = snapshot?.messages || [];
     const allThreads = sortMessages(list, els.allThreadsSort.value);
-    const inbox = sortMessages(list.filter((message) => message.toWorkerId === 'operator'), els.inboxSort.value);
-    const traffic = sortMessages(list.filter((message) => message.toWorkerId !== 'operator'), els.trafficSort.value).slice(0, 30);
+    const inbox = sortMessages(list.filter((message) => involvesOperator(message)), els.inboxSort.value);
+    const traffic = sortMessages(list.filter((message) => !involvesOperator(message)), els.trafficSort.value).slice(0, 30);
     els.allThreadsCount.textContent = String(allThreads.length);
     els.inboxCount.textContent = String(inbox.length);
     els.trafficCount.textContent = String(traffic.length);
@@ -292,8 +296,8 @@
       : '<div class="empty">No semantic messages yet.</div>';
 
     els.inbox.innerHTML = inbox.length
-      ? inbox.map((message) => renderMessageCard(message, true, 1200)).join('')
-      : '<div class="empty">No worker messages to the operator.</div>';
+      ? inbox.map((message) => renderMessageCard(message, message.toWorkerId === 'operator', 1200)).join('')
+      : '<div class="empty">No operator messages yet.</div>';
 
     els.traffic.innerHTML = traffic.length
       ? traffic.map((message) => renderMessageCard(message, false, 500)).join('')
