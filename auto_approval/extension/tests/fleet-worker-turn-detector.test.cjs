@@ -27,7 +27,7 @@ test('new assistant turn identity participates in the response fingerprint', () 
 test('DOM activity forces a throttled rescan but quiet time advances only on assistant change', () => {
   assert.match(source, /if \(active && mutations\.length\)[\s\S]*?active\.textDirty = true;/);
   assert.doesNotMatch(source, /if \(touchedAssistant && active\)[\s\S]*?active\.lastChangeAt = Date\.now\(\)/);
-  assert.match(source, /if \(currentFingerprint !== active\.lastFingerprint\)[\s\S]*?active\.lastChangeAt = Date\.now\(\)/);
+  assert.match(source, /if \(currentFingerprint !== active\.lastFingerprint\)[\s\S]*?active\.lastChangeAt = nowAt/);
 });
 
 test('streaming detection is scoped to the composer stop control', () => {

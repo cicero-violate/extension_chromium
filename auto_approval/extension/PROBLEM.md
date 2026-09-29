@@ -134,3 +134,33 @@ Observed end-to-end transition:
 Final invariant:
 
 QUEUED -> DISPATCHED -> ACCEPTED -> DONE, with no prompt-echo contamination and no retry storm.
+
+## Long-running turn race fixed
+
+A second live issue was found after the earlier completion fixes: a worker could still be released while ChatGPT was visibly generating. The quiet-response fallback was evaluated before the active Stop-control guard. On long tool/model turns, that could mark the assignment complete and let the scheduler send another queued fleet message into the same tab.
+
+Fix:
+
+- Active ChatGPT generation is now authoritative: while the visible usable composer Stop control is present, the worker cannot complete or auto-recover the assignment.
+- The background scheduler independently checks the target ChatGPT page before every reserved dispatch. If a live Stop control is present, the message stays queued and is not sent.
+- A deferred preflight does not consume a task attempt.
+- The scheduler now records reservation separately from actual accepted send (`message.reserved` / `task.reserved`, then `message.sent` / `task.started`).
+- A 15-minute legitimate turn is allowed to continue indefinitely while ChatGPT remains active; there is no elapsed-time cancellation while the Stop control is present.
+- If no response starts within 2 minutes, the assignment may be automatically recovered.
+- If generation had started, then stopped, and no observable assistant response appears for 20 minutes, the assignment may be automatically recovered.
+- Automatic recovery is bounded to one resend. A second recovery failure is terminally blocked instead of creating an infinite resend loop.
+- Unrelated DOM mutations no longer reset the one-minute quiet fallback; only an actual assistant-response change starts that settle timer.
+
+Live proof:
+
+- A synthetic visible Stop control was inserted into worker `W-1043671402`.
+- Test message `M-239` was reserved repeatedly but remained `QUEUED`; the Journal recorded `dispatch.deferred_active_turn`, and the message text did not appear in the ChatGPT transcript.
+- After the synthetic Stop control was removed, the same message was admitted and sent.
+- ChatGPT returned `BUSY_GUARD_TEST_OK`.
+- `M-239` transitioned to `DONE`, and `W-1043671402` returned to `IDLE` with no current assignment.
+
+Long-turn invariant:
+
+`ACTIVE STOP CONTROL => NO COMPLETION + NO NEW SEND`
+
+`IDLE/COMPLETE => NEXT QUEUED MESSAGE MAY DISPATCH`

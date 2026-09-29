@@ -11,6 +11,9 @@ const WORKER_BUSY_FRESH_MS = 30000;
 const HEARTBEAT_FLUSH_MS = 10000;
 const WORKER_WAKE_TIMEOUT_MS = 20000;
 const WORKER_BRIDGE_RETRY_MS = 250;
+const FLEET_PAGE_BUSY_RECHECK_MS = 5000;
+const MAX_AUTO_RECOVERY_ATTEMPTS = 1;
+const AUTO_RECOVERY_REASON_PREFIX = 'auto-recovery: ';
 const LEGACY_SLEEP_PAGE_URL = chrome.runtime.getURL('sleep.html');
 const WARM_IDLE_ALARM_PREFIX = 'model-fleet:warm-idle:';
 const DEFAULT_WARM_IDLE_MS = 60000;
@@ -426,6 +429,79 @@ async function ensureFleetBridge(tabId) {
     // because an old extension context may have a completion handoff waiting in-page.
   }
   throw new Error('fleet bridge did not answer ping after injection');
+}
+
+async function readFleetPageActivity(tabId) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const button = document.querySelector(
+          '#composer-submit-button[data-testid="stop-button"], '
+          + '#composer-submit-button[data-testid*="stop" i], '
+          + '#composer-submit-button[aria-label*="stop" i], '
+          + 'button[data-testid="stop-button"]'
+        );
+        if (!button) return { available: true, busy: false };
+        const style = window.getComputedStyle(button);
+        const rect = button.getBoundingClientRect();
+        const usable = style.display !== 'none'
+          && style.visibility !== 'hidden'
+          && style.opacity !== '0'
+          && rect.width > 0
+          && rect.height > 0
+          && !button.disabled
+          && !button.hasAttribute('disabled')
+          && button.getAttribute('aria-disabled') !== 'true';
+        return { available: true, busy: usable };
+      },
+    });
+    return results?.[0]?.result || { available: false, busy: false };
+  } catch {
+    return { available: false, busy: false };
+  }
+}
+
+async function deferReservedDispatchForActivePage(dispatch) {
+  await mutateFleet((state) => {
+    const worker = state.workers[dispatch.workerId];
+    if (!worker || worker.currentAssignmentId !== dispatch.assignment.id) return;
+
+    if (dispatch.assignment.kind === 'task') {
+      const task = state.tasks[dispatch.assignment.taskId];
+      if (task?.assignmentId === dispatch.assignment.id) {
+        task.status = 'pending';
+        task.assignedWorkerId = null;
+        task.assignmentId = null;
+        task.startedAt = 0;
+        task.attempts = Math.max(0, Number(task.attempts || 0) - 1);
+        task.statusNote = 'deferred: ChatGPT turn is still active in the worker tab';
+      }
+    } else {
+      const semantic = state.messages.find((item) => item.id === dispatch.assignment.messageId);
+      if (semantic?.assignmentId === dispatch.assignment.id) {
+        semantic.status = 'queued';
+        semantic.assignmentId = null;
+        semantic.lastDeferredReason = 'ChatGPT turn is still active in the worker tab';
+      }
+    }
+
+    worker.currentAssignmentId = null;
+    worker.currentTaskId = null;
+    worker.currentMessageId = null;
+    worker.status = 'waiting';
+    worker.lifecycle = 'waiting';
+    worker.busy = true;
+    worker.pageBusyUntil = now() + FLEET_PAGE_BUSY_RECHECK_MS;
+    appendJournal(
+      state,
+      'dispatch.deferred_active_turn',
+      dispatch.workerId + ' still has an active ChatGPT turn; ' + dispatch.assignment.id + ' was not sent',
+      { assignmentId: dispatch.assignment.id, tabId: dispatch.tabId }
+    );
+  });
+
+  setTimeout(() => schedule().catch(() => {}), FLEET_PAGE_BUSY_RECHECK_MS);
 }
 
 
@@ -949,6 +1025,8 @@ function queueSemanticMessage(state, { fromWorkerId = null, from = null, toWorke
     deliveredAt: toWorkerId === 'operator' ? now() : 0,
     completedAt: 0,
     response: '',
+    autoRecoveryAttempts: 0,
+    lastAutoRecoveryReason: '',
   };
   state.messages.push(message);
   if (state.messages.length > MAX_MESSAGES) state.messages.splice(0, state.messages.length - MAX_MESSAGES);
@@ -993,7 +1071,11 @@ function chooseDispatches(state) {
   const maxConcurrency = Math.max(1, Math.min(64, Number(state.policy.maxConcurrency || 8)));
   let active = Object.values(state.workers).filter((w) => w.currentAssignmentId).length;
   const dispatches = [];
-  const available = () => Object.values(state.workers).filter((w) => w.enabled && !w.currentAssignmentId && !workerBusyIsFresh(w) && w.status !== 'blocked');
+  const available = () => Object.values(state.workers).filter((w) => w.enabled
+    && !w.currentAssignmentId
+    && !workerBusyIsFresh(w)
+    && Number(w.pageBusyUntil || 0) <= now()
+    && w.status !== 'blocked');
 
   const queuedMessages = state.messages
     .filter((m) => m.status === 'queued' && m.toWorkerId !== 'operator')
@@ -1024,7 +1106,7 @@ function chooseDispatches(state) {
       },
     });
     active += 1;
-    appendJournal(state, 'message.dispatched', `${message.id} dispatched to ${worker.id}`);
+    appendJournal(state, 'message.reserved', `${message.id} reserved for ${worker.id}`);
   }
 
   const tasks = Object.values(state.tasks)
@@ -1058,7 +1140,7 @@ function chooseDispatches(state) {
       },
     });
     active += 1;
-    appendJournal(state, 'task.dispatched', `${task.id} dispatched to ${worker.id}`, { assignmentId });
+    appendJournal(state, 'task.reserved', `${task.id} reserved for ${worker.id}`, { assignmentId });
   }
 
   return dispatches;
@@ -1142,6 +1224,11 @@ async function dispatchReserved(dispatch) {
   try {
     await clearWarmIdleAlarm(dispatch.workerId);
     await assertDispatchStillAuthorized(dispatch);
+    const pageActivity = await readFleetPageActivity(dispatch.tabId);
+    if (pageActivity.busy) {
+      await deferReservedDispatchForActivePage(dispatch);
+      return;
+    }
     await activateWorkerForDispatch(dispatch);
     await assertDispatchStillAuthorized(dispatch);
     const response = await Promise.race([
@@ -1165,6 +1252,15 @@ async function dispatchReserved(dispatch) {
         workerId: dispatch.workerId,
         tabId: dispatch.tabId,
       });
+      if (dispatch.assignment.kind === 'message') {
+        appendJournal(state, 'message.sent', `${dispatch.assignment.messageId} sent to ${dispatch.workerId}`, {
+          assignmentId: dispatch.assignment.id,
+        });
+      } else {
+        appendJournal(state, 'task.started', `${dispatch.assignment.taskId} started by ${dispatch.workerId}`, {
+          assignmentId: dispatch.assignment.id,
+        });
+      }
     });
   } catch (error) {
     const failure = await failDispatch(dispatch, error);
@@ -1207,6 +1303,7 @@ async function schedule() {
         && target.enabled
         && !target.currentAssignmentId
         && !workerBusyIsFresh(target)
+        && Number(target.pageBusyUntil || 0) <= now()
         && target.status !== 'blocked'
         && target.lifecycle !== 'parking';
     });
@@ -1523,7 +1620,11 @@ async function focusWorker(workerId) {
 
 const OPERATOR_CANCEL_REASON = 'operator clear/cancel dispatch';
 
-function releaseWorkerAssignment(state, workerId, assignmentId, reason, { requeue = true, eventType = 'assignment.cancelled' } = {}) {
+function releaseWorkerAssignment(state, workerId, assignmentId, reason, {
+  requeue = true,
+  eventType = 'assignment.cancelled',
+  terminalStatus = 'cancelled',
+} = {}) {
   liveHeartbeats.delete(workerId);
   const worker = state.workers[workerId];
   if (!worker || !worker.currentAssignmentId) return null;
@@ -1542,9 +1643,9 @@ function releaseWorkerAssignment(state, workerId, assignmentId, reason, { requeu
       if (requeue) {
         task.status = 'pending';
       } else {
-        task.status = 'cancelled';
+        task.status = terminalStatus;
         task.completedAt = now();
-        task.statusNote = reason || 'cancelled by operator';
+        task.statusNote = reason || (terminalStatus === 'blocked' ? 'automatic recovery exhausted' : 'cancelled by operator');
       }
     }
   }
@@ -1556,8 +1657,9 @@ function releaseWorkerAssignment(state, workerId, assignmentId, reason, { requeu
       if (requeue) {
         semantic.status = 'queued';
       } else {
-        semantic.status = 'cancelled';
+        semantic.status = terminalStatus;
         semantic.completedAt = now();
+        semantic.lastDispatchError = reason || '';
       }
     }
   }
@@ -1801,6 +1903,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         completedAt: 0,
         result: '',
         statusNote: '',
+        autoRecoveryAttempts: 0,
+        lastAutoRecoveryReason: '',
       };
       if (!task.prompt) throw new Error('task prompt is required');
       state.tasks[id] = task;
@@ -1821,6 +1925,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       task.assignmentId = null;
       task.result = '';
       task.statusNote = '';
+      task.autoRecoveryAttempts = 0;
+      task.lastAutoRecoveryReason = '';
       appendJournal(state, 'task.retried', `${task.id} queued for retry`);
     }).then(({ state }) => {
       schedule().catch(() => {});
@@ -1907,13 +2013,57 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!sender.tab?.id) return false;
     return reply(mutateFleet((state) => {
       const workerId = workerIdForTab(sender.tab.id);
-      const operatorCancelled = message.reason === OPERATOR_CANCEL_REASON;
-      return releaseWorkerAssignment(state, workerId, message.assignmentId, message.reason || '', {
-        requeue: !operatorCancelled,
-        eventType: operatorCancelled ? 'assignment.operator_cancelled' : 'assignment.cancelled',
+      const worker = state.workers[workerId];
+      const reason = String(message.reason || '');
+      const operatorCancelled = reason === OPERATOR_CANCEL_REASON;
+      const autoRecovery = reason.startsWith(AUTO_RECOVERY_REASON_PREFIX);
+      let requeue = !operatorCancelled;
+      let eventType = operatorCancelled ? 'assignment.operator_cancelled' : 'assignment.cancelled';
+      let terminalStatus = 'cancelled';
+      let recoveryAttempt = 0;
+
+      if (autoRecovery && worker?.currentAssignmentId === message.assignmentId) {
+        const item = worker.currentTaskId
+          ? state.tasks[worker.currentTaskId]
+          : state.messages.find((entry) => entry.id === worker.currentMessageId);
+        const used = Number(item?.autoRecoveryAttempts || 0);
+        requeue = used < MAX_AUTO_RECOVERY_ATTEMPTS;
+        if (item) {
+          item.lastAutoRecoveryReason = reason.slice(AUTO_RECOVERY_REASON_PREFIX.length);
+          if (requeue) {
+            item.autoRecoveryAttempts = used + 1;
+            recoveryAttempt = item.autoRecoveryAttempts;
+          }
+        }
+        eventType = requeue ? 'assignment.recovery_queued' : 'assignment.recovery_exhausted';
+        terminalStatus = requeue ? 'cancelled' : 'blocked';
+      }
+
+      const released = releaseWorkerAssignment(state, workerId, message.assignmentId, reason, {
+        requeue,
+        eventType,
+        terminalStatus,
       });
-    }).then(({ state }) => {
-      schedule().catch(() => {});
+
+      if (released && autoRecovery) {
+        const item = released.taskId
+          ? state.tasks[released.taskId]
+          : state.messages.find((entry) => entry.id === released.messageId);
+        if (item && requeue) {
+          const note = 'automatic recovery ' + recoveryAttempt + '/' + MAX_AUTO_RECOVERY_ATTEMPTS
+            + ': ' + item.lastAutoRecoveryReason;
+          if (released.taskId) item.statusNote = note;
+          else item.lastDeferredReason = note;
+        }
+      }
+
+      return { released, autoRecovery, requeued: !!released && requeue };
+    }).then(({ state, result }) => {
+      if (result?.autoRecovery && result?.requeued) {
+        setTimeout(() => schedule().catch(() => {}), 1000);
+      } else {
+        schedule().catch(() => {});
+      }
       return { snapshot: publicSnapshot(state) };
     }));
   }

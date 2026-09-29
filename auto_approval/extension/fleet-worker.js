@@ -10,6 +10,9 @@
   // to produce their final FLEET_STATUS marker.
   const FALLBACK_SETTLE_MS = 60000;
   const START_TIMEOUT_MS = 120000;
+  const WATCHDOG_INTERVAL_MS = 60000;
+  const LONG_RUNNING_STALL_MS = 20 * 60 * 1000;
+  const AUTO_RECOVERY_REASON_PREFIX = 'auto-recovery: ';
   const COMPLETION_HANDOFF_ID = '__model_fleet_completion_handoff__';
 
   let registered = false;
@@ -21,6 +24,7 @@
   let monitorCheckQueued = false;
   let lastMonitorCheckAt = 0;
   let monitorThrottleTimer = null;
+  let monitorWatchdogTimer = null;
   let active = null;
   let pendingCompletion = readCompletionHandoff();
   let latestAssistantNodeCache = null;
@@ -119,7 +123,7 @@
       + '#composer-submit-button[aria-label*="stop" i], '
       + 'button[data-testid="stop-button"]'
     );
-    return !!stopButton && enabledButton(stopButton);
+    return !!stopButton && usable(stopButton) && enabledButton(stopButton);
   }
 
   function isStreaming() {
@@ -510,6 +514,10 @@
       clearTimeout(monitorThrottleTimer);
       monitorThrottleTimer = null;
     }
+    if (monitorWatchdogTimer !== null) {
+      clearInterval(monitorWatchdogTimer);
+      monitorWatchdogTimer = null;
+    }
     monitorCheckRunning = false;
     monitorCheckQueued = false;
     lastMonitorCheckAt = 0;
@@ -559,7 +567,6 @@
     if (root) {
       monitorObserver = new MutationObserver((mutations) => {
         rememberAssistantNodeFromMutations(mutations);
-        if (active?.textDirty) scheduleMonitorSettleCheck();
         requestMonitorCheck();
       });
       monitorObserver.observe(root, {
@@ -576,7 +583,38 @@
       monitorStartTimer = null;
       requestMonitorCheck();
     }, START_TIMEOUT_MS + 50);
+    monitorWatchdogTimer = setInterval(() => {
+      requestMonitorCheck();
+    }, WATCHDOG_INTERVAL_MS);
     requestMonitorCheck();
+  }
+
+  async function requestAutoRecovery(reason) {
+    if (!active || isStreaming()) return false;
+    const stalled = active;
+    active = null;
+    stopMonitor();
+    try {
+      const response = await runtimeMessage({
+        type: 'fleet:assignment-cancelled',
+        assignmentId: stalled.assignment.id,
+        reason: AUTO_RECOVERY_REASON_PREFIX + reason,
+      });
+      if (response?.ok === false) throw new Error(response.error || 'auto recovery rejected');
+      signalIdleReady(stalled.assignment.id);
+      return true;
+    } catch (error) {
+      if (extensionContextInvalidated(error)) {
+        retireInvalidatedBridge();
+        return false;
+      }
+      active = stalled;
+      active.lastProgressAt = Date.now();
+      active.textDirty = true;
+      startMonitor();
+      console.warn('[model-fleet] automatic recovery request failed; continuing original assignment', error);
+      return false;
+    }
   }
 
   async function reportCompletionPayload(payload) {
@@ -651,10 +689,14 @@
 
   async function monitorActive() {
     if (!active) return;
+    const nowAt = Date.now();
     const streaming = isStreaming();
-    if (streaming) active.sawStreaming = true;
+    if (streaming) {
+      active.sawStreaming = true;
+      active.lastProgressAt = nowAt;
+    }
 
-    const elapsed = Date.now() - active.sentAt;
+    const elapsed = nowAt - active.sentAt;
     if (active.textDirty) {
       const snapshot = latestAssistantSnapshot(true);
       const text = snapshot.text;
@@ -663,7 +705,8 @@
       if (currentFingerprint !== active.lastFingerprint) {
         active.lastFingerprint = currentFingerprint;
         active.lastText = text;
-        active.lastChangeAt = Date.now();
+        active.lastChangeAt = nowAt;
+        active.lastProgressAt = nowAt;
         active.responseChanged = currentFingerprint !== active.baselineFingerprint && text.trim().length > 0;
         active.explicitTerminal = active.responseChanged && hasFleetTerminalMarker(text);
         if (active.responseChanged) {
@@ -676,7 +719,13 @@
       }
     }
 
-    const quietFor = Date.now() - active.lastChangeAt;
+    // Never release the worker while ChatGPT still exposes the active Stop
+    // control. Long tool/model turns can legitimately remain active for many
+    // minutes; completing here would allow a second fleet message to collide
+    // with the still-running turn.
+    if (streaming) return;
+
+    const quietFor = nowAt - active.lastChangeAt;
     if (active.responseChanged && active.explicitTerminal) {
       await finishActive(active.lastText);
       return;
@@ -688,19 +737,14 @@
       return;
     }
 
-    // A stale Stop button must not pin an already-settled assignment forever.
-    // For genuinely active turns, streaming still suppresses the no-start timeout.
-    if (streaming) return;
-
     if (!active.sawStreaming && elapsed > START_TIMEOUT_MS && !active.responseChanged) {
-      const failed = active;
-      active = null;
-      stopMonitor();
-      runtimeMessage({
-        type: "fleet:assignment-cancelled",
-        assignmentId: failed.assignment.id,
-        reason: "no model response observed before start timeout",
-      }).then(() => signalIdleReady(failed.assignment.id)).catch(() => {});
+      await requestAutoRecovery('no model response observed before start timeout');
+      return;
+    }
+
+    const noProgressFor = nowAt - Number(active.lastProgressAt || active.sentAt);
+    if (active.sawStreaming && !active.responseChanged && noProgressFor >= LONG_RUNNING_STALL_MS) {
+      await requestAutoRecovery('long-running assignment stalled after active streaming stopped');
     }
   }
 
@@ -723,6 +767,7 @@
       lastFingerprint: baseline.fingerprint,
       lastText: baselineText,
       lastChangeAt: sentAt,
+      lastProgressAt: sentAt,
       sawStreaming: false,
       textDirty: true,
       responseChanged: false,
