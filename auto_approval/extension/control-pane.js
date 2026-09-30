@@ -277,8 +277,8 @@
 
   function renderWorkers() {
     const list = workers().sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
-    const liveCount = list.filter((worker) => worker.enabled !== false && worker.lifecycle !== 'stale' && Number.isInteger(worker.tabId)).length;
-    els.workerCount.textContent = `${list.length} slots · ${liveCount} live`;
+    const boundCount = list.filter((worker) => worker.enabled !== false && worker.lifecycle !== 'stale' && Number.isInteger(worker.tabId)).length;
+    els.workerCount.textContent = `${list.length} slots · ${boundCount} bound`;
     if (!list.length) {
       els.workers.innerHTML = '<div class="empty">No workers registered. Open ChatGPT tabs, then register them.</div>';
       return;

@@ -145,5 +145,6 @@ test('startup reconciles stale bindings without auto-creating fleet windows', ()
   const lifecycle = background.slice(background.indexOf('chrome.runtime.onInstalled.addListener'));
   assert.match(lifecycle, /reconcileStaleWorkerBindings\('browser startup'\)/);
   assert.match(lifecycle, /reconcileStaleWorkerBindings\('service worker load'\)/);
+  assert.match(lifecycle, /recoverRegisteredFleetBridges\('service worker load'\)/);
   assert.doesNotMatch(lifecycle, /reconcileFleetTopology\(/);
 });

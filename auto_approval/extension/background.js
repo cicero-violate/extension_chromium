@@ -554,6 +554,162 @@ async function ensureFleetBridge(tabId) {
   throw new Error('fleet bridge did not answer ping after injection');
 }
 
+async function setFleetRecoveryHint(tabId, assignmentId = null) {
+  if (!Number.isInteger(tabId)) return;
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (id) => {
+      const markerId = '__model_fleet_assignment_recovery__';
+      let node = document.getElementById(markerId);
+      if (!id) {
+        node?.remove();
+        return;
+      }
+      if (!node) {
+        node = document.createElement('meta');
+        node.id = markerId;
+        node.hidden = true;
+        document.documentElement?.appendChild(node);
+      }
+      node?.setAttribute('data-assignment-id', String(id));
+    },
+    args: [assignmentId || null],
+  });
+}
+
+function assignmentForWorker(state, worker) {
+  if (!worker?.currentAssignmentId) return null;
+  if (worker.currentTaskId) {
+    const task = state.tasks[worker.currentTaskId];
+    if (!task || task.assignmentId !== worker.currentAssignmentId) return null;
+    return {
+      id: worker.currentAssignmentId,
+      kind: 'task',
+      taskId: task.id,
+      prompt: buildTaskPrompt(state, task, worker),
+      startedAt: Number(task.startedAt || 0),
+    };
+  }
+  if (worker.currentMessageId) {
+    const message = state.messages.find((item) => item.id === worker.currentMessageId);
+    if (!message || message.assignmentId !== worker.currentAssignmentId) return null;
+    return {
+      id: worker.currentAssignmentId,
+      kind: 'message',
+      messageId: message.id,
+      prompt: buildMessagePrompt(state, message, worker),
+      startedAt: Number(message.deliveredAt || 0),
+    };
+  }
+  return null;
+}
+
+async function releaseUnrecoverableBridgeAssignment(workerId, assignmentId, reason) {
+  const { result } = await mutateFleet((state) => {
+    const worker = state.workers[workerId];
+    if (!worker || worker.currentAssignmentId !== assignmentId) return false;
+    const released = releaseWorkerAssignment(state, workerId, assignmentId, reason, {
+      requeue: true,
+      eventType: 'assignment.bridge_recovery_queued',
+      terminalStatus: 'cancelled',
+    });
+    if (released) {
+      appendJournal(state, 'assignment.bridge_recovery_failed', assignmentId + ' could not reattach after extension reload', {
+        workerId,
+        reason,
+      });
+    }
+    return !!released;
+  });
+  if (result) schedule().catch(() => {});
+  return result === true;
+}
+
+async function recoverRegisteredWorkerBridge(workerId, reason = 'extension context recovery') {
+  const state = await loadFleetState();
+  const worker = state.workers[workerId];
+  if (!worker?.enabled || !Number.isInteger(worker.tabId)) return { workerId, recovered: false, skipped: true };
+  const tab = await supportedTab(worker.tabId);
+  if (!tab) return { workerId, recovered: false, stale: true };
+
+  const assignment = assignmentForWorker(state, worker);
+  try {
+    await setFleetRecoveryHint(worker.tabId, assignment?.id || null);
+    await ensureFleetBridge(worker.tabId);
+
+    let assignmentRecovery = null;
+    if (assignment) {
+      assignmentRecovery = await chrome.tabs.sendMessage(worker.tabId, {
+        type: 'fleet:recover-assignment',
+        assignment,
+      });
+      if (!assignmentRecovery?.ok || assignmentRecovery?.reattached !== true) {
+        const why = assignmentRecovery?.error || assignmentRecovery?.reason || 'worker could not prove assignment custody in the current conversation';
+        await releaseUnrecoverableBridgeAssignment(workerId, assignment.id, reason + ': ' + why);
+        await setFleetRecoveryHint(worker.tabId, null).catch(() => {});
+      }
+    }
+
+    await chrome.tabs.sendMessage(worker.tabId, {
+      type: 'fleet:registration-changed',
+      registered: true,
+    });
+
+    await mutateFleet((latest) => {
+      const current = latest.workers[workerId];
+      if (!current || current.tabId !== worker.tabId) return;
+      current.heartbeatAt = now();
+      if (!current.currentAssignmentId && current.status !== 'blocked') {
+        current.status = current.busy ? 'waiting' : 'idle';
+        if (!['warm-idle', 'rotating'].includes(current.lifecycle)) current.lifecycle = 'idle';
+      }
+      appendJournal(latest, 'worker.bridge_recovered', workerId + ' bridge recovered', {
+        reason,
+        tabId: worker.tabId,
+        assignmentId: assignment?.id || null,
+        reattached: assignmentRecovery?.reattached === true,
+      });
+    });
+
+    return {
+      workerId,
+      recovered: true,
+      assignmentId: assignment?.id || null,
+      reattached: assignmentRecovery?.reattached === true,
+    };
+  } catch (error) {
+    if (assignment) {
+      await releaseUnrecoverableBridgeAssignment(workerId, assignment.id, reason + ': ' + String(error)).catch(() => {});
+    }
+    return { workerId, recovered: false, error: String(error) };
+  } finally {
+    if (!assignment) await setFleetRecoveryHint(worker.tabId, null).catch(() => {});
+  }
+}
+
+let fleetBridgeRecoveryPromise = null;
+
+async function recoverRegisteredFleetBridges(reason = 'extension context recovery') {
+  if (fleetBridgeRecoveryPromise) return fleetBridgeRecoveryPromise;
+  fleetBridgeRecoveryPromise = (async () => {
+    const state = await loadFleetState();
+    const workerIds = Object.values(state.workers)
+      .filter((worker) => worker.enabled && Number.isInteger(worker.tabId))
+      .map((worker) => worker.id);
+    const results = [];
+    for (const workerId of workerIds) {
+      results.push(await recoverRegisteredWorkerBridge(workerId, reason));
+    }
+    schedule().catch(() => {});
+    return results;
+  })();
+  try {
+    return await fleetBridgeRecoveryPromise;
+  } finally {
+    fleetBridgeRecoveryPromise = null;
+  }
+}
+
 async function readFleetPageActivity(tabId) {
   try {
     const results = await chrome.scripting.executeScript({
@@ -2958,12 +3114,15 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 
 chrome.runtime.onInstalled.addListener(() => {
-  reconcileStaleWorkerBindings('extension installed').catch(() => {});
+  reconcileStaleWorkerBindings('extension installed')
+    .then(() => recoverRegisteredFleetBridges('extension installed'))
+    .catch(() => {});
   ensureApprovalBridgesForSupportedTabs().catch(() => {});
 });
 
 chrome.runtime.onStartup.addListener(() => {
   reconcileStaleWorkerBindings('browser startup')
+    .then(() => recoverRegisteredFleetBridges('browser startup'))
     .then(() => loadFleetState())
     .then((state) => startPendingChatRotations(state))
     .catch(() => {});
@@ -2971,6 +3130,7 @@ chrome.runtime.onStartup.addListener(() => {
 
 // Also run once whenever the MV3 service worker itself is loaded/reloaded.
 reconcileStaleWorkerBindings('service worker load')
+  .then(() => recoverRegisteredFleetBridges('service worker load'))
   .then(() => loadFleetState())
   .then((state) => startPendingChatRotations(state))
   .catch(() => {});

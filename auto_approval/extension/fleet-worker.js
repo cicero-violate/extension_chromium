@@ -12,6 +12,7 @@
   const HARD_ASSIGNMENT_TIMEOUT_MS = 15 * 60 * 1000;
   const AUTO_RECOVERY_REASON_PREFIX = 'auto-recovery: ';
   const COMPLETION_HANDOFF_ID = '__model_fleet_completion_handoff__';
+  const ASSIGNMENT_RECOVERY_HINT_ID = '__model_fleet_assignment_recovery__';
 
   let registered = false;
   let heartbeatTimer = null;
@@ -51,6 +52,42 @@
       node?.remove();
       return null;
     }
+  }
+
+  function readAssignmentRecoveryHint() {
+    const node = document.getElementById(ASSIGNMENT_RECOVERY_HINT_ID);
+    const assignmentId = String(node?.getAttribute('data-assignment-id') || '').trim();
+    return assignmentId || null;
+  }
+
+  function clearAssignmentRecoveryHint(assignmentId = null) {
+    const node = document.getElementById(ASSIGNMENT_RECOVERY_HINT_ID);
+    if (!node) return;
+    const current = String(node.getAttribute('data-assignment-id') || '').trim();
+    if (!assignmentId || current === assignmentId) node.remove();
+  }
+
+  function normalizedTurnText(text) {
+    return normalizeFleetProtocolSource(text).replace(/\s+/g, ' ').trim();
+  }
+
+  function latestUserTurnText() {
+    const candidates = [
+      ...document.querySelectorAll('[data-message-author-role="user"]'),
+      ...document.querySelectorAll('.user-message'),
+    ];
+    const node = candidates[candidates.length - 1] || null;
+    return String(node?.innerText || node?.textContent || '').trim();
+  }
+
+  function assignmentPromptObserved(assignment) {
+    const expected = normalizedTurnText(assignment?.prompt || '');
+    const actual = normalizedTurnText(latestUserTurnText());
+    if (!expected || !actual) return false;
+    if (actual === expected) return true;
+    const head = expected.slice(0, Math.min(240, expected.length));
+    const tail = expected.slice(Math.max(0, expected.length - Math.min(240, expected.length)));
+    return expected.length >= 160 && actual.includes(head) && actual.includes(tail);
   }
 
   function writeCompletionHandoff(completed, text) {
@@ -651,6 +688,7 @@
     if (!active) return;
     const completed = active;
     active = null;
+    clearAssignmentRecoveryHint(completed.assignment.id);
     stopMonitor();
     const payload = {
       assignmentId: completed.assignment.id,
@@ -748,6 +786,61 @@
     }
   }
 
+  async function recoverAssignment(assignment) {
+    if (!assignment?.id || !assignment.prompt) throw new Error('invalid recovery assignment');
+    if (pendingCompletion?.assignmentId === assignment.id) {
+      registered = true;
+      startHeartbeat();
+      return { assignmentId: assignment.id, reattached: true, recoveringCompletion: true };
+    }
+    if (active) {
+      if (active.assignment.id === assignment.id) {
+        registered = true;
+        startHeartbeat();
+        return { assignmentId: assignment.id, reattached: true, alreadyActive: true };
+      }
+      throw new Error('worker already has assignment ' + active.assignment.id);
+    }
+
+    const streaming = isStreaming();
+    const promptObserved = assignmentPromptObserved(assignment);
+    if (!streaming && !promptObserved) {
+      return {
+        assignmentId: assignment.id,
+        reattached: false,
+        reason: 'assignment prompt was not observed in the current ChatGPT conversation',
+      };
+    }
+
+    const attachedAt = Date.now();
+    active = {
+      assignment,
+      phase: 'running',
+      acceptedAt: Number(assignment.startedAt || attachedAt),
+      sentAt: Number(assignment.startedAt || attachedAt),
+      baselineFingerprint: '__fleet_context_recovery__',
+      lastFingerprint: '',
+      lastText: '',
+      lastChangeAt: attachedAt,
+      lastProgressAt: attachedAt,
+      sawStreaming: streaming,
+      textDirty: true,
+      responseChanged: false,
+      explicitTerminal: false,
+      recoveredAfterExtensionReload: true,
+    };
+    registered = true;
+    clearAssignmentRecoveryHint(assignment.id);
+    startHeartbeat();
+    startMonitor();
+    return {
+      assignmentId: assignment.id,
+      reattached: true,
+      streaming,
+      promptObserved,
+    };
+  }
+
   async function executeAssignment(assignment) {
     if (!assignment?.id || !assignment.prompt) throw new Error('invalid assignment');
     if (active) throw new Error(`worker already has assignment ${active.assignment.id}`);
@@ -782,6 +875,7 @@
     if (!active) return;
     const cancelled = active;
     active = null;
+    clearAssignmentRecoveryHint(cancelled.assignment.id);
     stopMonitor();
 
     const stopButton = document.querySelector(
@@ -855,6 +949,13 @@
       return true;
     }
 
+    if (message.type === 'fleet:recover-assignment') {
+      recoverAssignment(message.assignment)
+        .then((result) => sendResponse({ ok: true, ...result }))
+        .catch((error) => sendResponse({ ok: false, error: String(error) }));
+      return true;
+    }
+
     if (message.type === 'fleet:cancel-current') {
       cancelCurrent(message.reason || 'cancelled')
         .then(() => sendResponse({ ok: true }))
@@ -878,7 +979,7 @@
     try {
       const response = await runtimeMessage({
         type: 'fleet:worker-hello',
-        activeAssignmentId: active?.assignment.id || pendingCompletion?.assignmentId || null,
+        activeAssignmentId: active?.assignment.id || pendingCompletion?.assignmentId || readAssignmentRecoveryHint() || null,
       });
       registered = response?.registered === true;
       if (registered) startHeartbeat();
