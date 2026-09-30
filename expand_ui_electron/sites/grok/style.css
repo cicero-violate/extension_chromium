@@ -1,1 +1,9 @@
-/* Add your custom styles here */
+/*
+ * Compute invariant:
+ * only uncap elements that explicitly declare a max-w-* utility under <main>.
+ * Avoid universal selectors and JavaScript DOM rescans.
+ */
+main[class*="max-w-"],
+main [class*="max-w-"] {
+  max-width: none !important;
+}

@@ -1,1 +1,14 @@
-/* Add your custom styles here */
+/*
+ * ChatGPT width kernel:
+ * current ChatGPT assets route conversation sizing through
+ * --thread-content-max-width and max-width utilities derived from it.
+ *
+ * Override only those thread-width controllers. This avoids the old
+ * whole-DOM MutationObserver/querySelectorAll("*") loop and avoids a
+ * universal CSS rule touching every element on each style recalculation.
+ */
+main[class*="thread-content-max-width"],
+main [class*="thread-content-max-width"] {
+  --thread-content-max-width: 100% !important;
+  max-width: none !important;
+}

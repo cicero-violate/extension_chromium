@@ -1,0 +1,8 @@
+/*
+ * Low-overhead fallback for supported LLM sites without a dedicated stylesheet.
+ * Restrict the layout override to explicit max-w-* utility containers under <main>.
+ */
+main[class*="max-w-"],
+main [class*="max-w-"] {
+  max-width: none !important;
+}

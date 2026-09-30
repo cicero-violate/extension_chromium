@@ -1,66 +1,51 @@
 {
   "manifest_version": 3,
   "name": "Expand UI",
-  "version": "1.0.0",
-  "description": "Custom UI tweaks per website",
-
+  "version": "1.1.0",
+  "description": "Low-overhead UI width expansion with site-scoped declarative CSS",
   "action": {
     "default_popup": "popup.html"
   },
-
-  "background": {
-    "service_worker": "background.js"
-  },
-
-  "permissions": [
-    "tabs",
-    "activeTab",
-    "scripting"
-  ],
-
-  "host_permissions": [
-    "*://*.perplexity.ai/*",
-    "*://*.chatgpt.com/*",
-    "*://*.claude.ai/*",
-    "*://*.gemini.google.com/*",
-    "*://*.grok.com/*",
-    "*://*.x.ai/*",
-    "*://x.com/*",
-    "*://twitter.com/*"
-  ],
-
   "content_scripts": [
     {
       "matches": [
-        "*://*.perplexity.ai/*",
-        "*://*.chatgpt.com/*",
-        "*://*.claude.ai/*",
-        "*://*.gemini.google.com/*"
-      ],
-      "js": [
-        "sites/chatgpt/expandMessages.js",
-        "sites/chatgpt/content.js"
+        "*://*.chatgpt.com/*"
       ],
       "css": [
         "sites/chatgpt/style.css"
       ],
-      "run_at": "document_end"
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "*://*.perplexity.ai/*",
+        "*://*.claude.ai/*",
+        "*://*.gemini.google.com/*"
+      ],
+      "css": [
+        "sites/shared/style.css"
+      ],
+      "run_at": "document_start"
     },
     {
       "matches": [
         "*://*.grok.com/*",
-        "*://*.x.ai/*",
-        "*://x.com/*",
-        "*://twitter.com/*"
-      ],
-      "js": [
-        "sites/grok/expandMessages.js",
-        "sites/grok/content.js"
+        "*://*.x.ai/*"
       ],
       "css": [
         "sites/grok/style.css"
       ],
-      "run_at": "document_end"
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "*://x.com/*",
+        "*://twitter.com/*"
+      ],
+      "css": [
+        "sites/x/style.css"
+      ],
+      "run_at": "document_start"
     }
   ]
 }

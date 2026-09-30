@@ -1,0 +1,59 @@
+/*
+ * X/Twitter desktop width kernel.
+ *
+ * X constrains the timeline with fixed desktop widths while the viewport can
+ * still have unused horizontal space. Expand only the semantic main/timeline
+ * layout; leave navigation, dialogs, composers, and overlays untouched.
+ */
+@media (min-width: 1280px) {
+  main[role="main"] {
+    flex: 1 1 auto !important;
+    width: auto !important;
+    max-width: none !important;
+    min-width: 0 !important;
+  }
+
+  /* The first main wrapper carries X's desktop width constraint. */
+  main[role="main"] > div {
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  /* Uncap the wrapper that directly owns the timeline column. */
+  main[role="main"] :has(> [data-testid="primaryColumn"]) {
+    flex: 1 1 auto !important;
+    width: auto !important;
+    max-width: none !important;
+    min-width: 0 !important;
+  }
+
+  [data-testid="primaryColumn"] {
+    flex: 1 1 600px !important;
+    width: auto !important;
+    max-width: none !important;
+    min-width: 600px !important;
+  }
+
+  /* X centers the actual timeline in a separate 600px region wrapper. */
+  [data-testid="primaryColumn"] div:has(> section[role="region"]) {
+    width: 100% !important;
+    max-width: none !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+
+  [data-testid="primaryColumn"] section[role="region"] {
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  /* X keeps each timeline article at 600px even after the column grows. */
+  [data-testid="primaryColumn"] article[data-testid="tweet"] {
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  [data-testid="sidebarColumn"] {
+    flex: 0 0 auto !important;
+  }
+}
