@@ -815,13 +815,17 @@ async function recoverRegisteredFleetBridges(reason = 'extension context recover
     for (const workerId of workerIds) {
       results.push(await recoverRegisteredWorkerBridge(workerId, reason));
     }
-    schedule().catch(() => {});
     return results;
   })();
   try {
     return await fleetBridgeRecoveryPromise;
   } finally {
     fleetBridgeRecoveryPromise = null;
+    // Recovery owns the worker-custody boundary. Only after every persisted
+    // assignment has either reattached or been fail-closed may new work reserve.
+    // This prevents a service-worker reload from reserving a fresh assignment
+    // that the still-running recovery pass then mistakes for stale custody.
+    schedule().catch(() => {});
   }
 }
 
@@ -2393,6 +2397,10 @@ async function dispatchReserved(dispatch) {
 }
 
 async function schedule() {
+  if (fleetBridgeRecoveryPromise) {
+    schedulePending = true;
+    return;
+  }
   if (scheduling) {
     schedulePending = true;
     return;

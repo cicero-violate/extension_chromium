@@ -98,3 +98,13 @@ test('recovered assignment hints are cleared on recovery completion and cancella
   const cancel = section(worker, 'async function cancelCurrent', 'async function heartbeat');
   assert.match(cancel, /clearAssignmentRecoveryHint\(cancelled\.assignment\.id\)/);
 });
+
+
+test('scheduler cannot reserve fresh work while bridge recovery owns custody', () => {
+  const recovery = section(background, 'async function recoverRegisteredFleetBridges', 'async function readFleetPageActivity');
+  assert.doesNotMatch(recovery, /schedule\(\).*for \(const workerId of workerIds\)/s);
+  assert.match(recovery, /fleetBridgeRecoveryPromise = null;[\s\S]*schedule\(\)\.catch/);
+  const scheduler = section(background, 'async function schedule()', 'async function scheduleMessageUntilAdmitted');
+  assert.match(scheduler, /if \(fleetBridgeRecoveryPromise\)/);
+  assert.match(scheduler, /schedulePending = true/);
+});
