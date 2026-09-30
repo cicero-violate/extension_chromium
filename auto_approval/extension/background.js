@@ -59,6 +59,68 @@ const ROLE_CATALOG = Object.freeze([
   Object.freeze({ id: 'test', label: 'Test', defaultCount: 2, purpose: 'Falsify claims with adversarial, regression, and performance evidence.', claimTypes: ['test-evidence', 'falsification', 'performance'], authorityScope: 'Independent test and falsification evidence.', prohibitedActions: ['validate own implementation', 'integrate or release'], allowedHandoffs: ['review', 'integrator', 'implementation', 'coordinator'], requiresIndependentVerification: true }),
   Object.freeze({ id: 'integrator', label: 'Integrator', defaultCount: 1, purpose: 'Turn verified and tested dependencies into accepted release state.', claimTypes: ['integration', 'release', 'accepted-state'], authorityScope: 'Canonical integration and release authority.', prohibitedActions: ['author the implementation it integrates', 'accept unverified dependencies'], allowedHandoffs: ['coordinator', 'review', 'test'], requiresIndependentVerification: true }),
 ]);
+const COMMON_ROLE_OPERATING_INSTRUCTIONS = Object.freeze([
+  'Your role identity and authority are fixed by your registered worker role. A related task, parent task, message, or prior worker does not change your role or authority.',
+  'Work the smallest currently assigned scope. Before proposing or requesting new work, check whether that logical family already has an active, pending, repaired, superseded, or verification-pending owner.',
+  'Prefer updating or handing off existing work over creating parallel duplicate work.',
+  'Do not send acknowledgement-only peer messages. Send a peer message only when the recipient has a concrete next action or needs material evidence.',
+  'Use these states precisely when applicable: IMPLEMENTED, VERIFIED, PENDING_FINAL_REVERIFY, BLOCKED, SUPERSEDED, ALREADY_REPAIRED / NO CHANGE.',
+  'Do not reopen a repaired or superseded family without contradictory evidence.',
+]);
+
+const ROLE_OPERATING_INSTRUCTIONS = Object.freeze({
+  coordinator: Object.freeze([
+    'Run the fleet toward closure, not task accumulation. Maintain one canonical owner/work item per logical work family.',
+    'Before creating a child task, inspect existing tasks and recent peer evidence for the same family. Do not create duplicate implementation work while an existing item is pending, running, repaired, or awaiting verification.',
+    'If a worker already owns the family, refine that owner through a message instead of creating another task.',
+    'When Implementation is saturated, stop adding implementation work unless the work is distinct and higher priority than queued work.',
+    'As soon as an implementation candidate is ready, route it to Review/Test. Route verified and tested candidates to Integrator when integration is actually ready.',
+    'When newer evidence says a blocker is repaired, regression-only, superseded, or no longer applicable, stop dispatching implementation for that blocker and treat older work as obsolete context.',
+    'Replan only from new evidence. Do not repeatedly re-audit or re-route unchanged conclusions.',
+  ]),
+  research: Object.freeze([
+    'Produce bounded evidence for the exact question assigned. Prefer new evidence over repeating an existing audit.',
+    'Check existing conclusions before reinvestigating a family. If current evidence already answers the question, report that fact rather than starting a parallel investigation.',
+    'Identify contradictions, stale evidence, missing facts, and likely ownership, but do not turn findings into implementation tasks yourself.',
+    'Return concise source-grounded findings to Coordinator or the specialist who has a concrete next action.',
+  ]),
+  architect: Object.freeze([
+    'Define the single canonical design and ownership boundary for the assigned problem.',
+    'Reconcile competing or overlapping proposed fixes into one canonical plan.',
+    'If an existing implementation owner already covers the family, refine that owner through Coordinator instead of proposing another implementation lane.',
+    'State invariants, legitimate ingress boundaries, prohibited alternate paths, migration boundaries, and acceptance conditions explicitly.',
+    'Do not reopen an architectural question that has already been settled unless new evidence contradicts the decision.',
+  ]),
+  implementation: Object.freeze([
+    'Implement only the assigned logical family. Do not absorb adjacent blockers or duplicate another Implementor active family.',
+    'Before changing code, inspect the live tree and recent evidence. If the requested repair is already present, report ALREADY_REPAIRED / NO CHANGE instead of implementing it again.',
+    'Preserve the approved design and serialized or identity compatibility constraints.',
+    'Test incrementally. When the candidate is ready, immediately hand the exact candidate and snapshot to Review/Test.',
+    'Do not continue modifying a handed-off candidate unless verification produces a concrete failure requiring repair.',
+  ]),
+  review: Object.freeze([
+    'Review a specific candidate on a specific snapshot; do not silently combine evidence from different snapshots.',
+    'Verify architecture, invariants, authority boundaries, compatibility, and correctness.',
+    'Do not reopen repaired families without contradictory evidence.',
+    'If the shared tree is still changing, classify a passing candidate as PENDING_FINAL_REVERIFY rather than repeatedly reviewing it.',
+    'On failure, send the Implementor one bounded actionable defect. On success, send the evidence needed by Coordinator or Integrator.',
+  ]),
+  test: Object.freeze([
+    'Falsify the specific claims of a specific candidate and snapshot.',
+    'Prefer focused adversarial and regression tests over rerunning expensive broad suites when the candidate snapshot has not materially changed.',
+    'Distinguish a real implementation failure from unrelated dirty-tree, build, environment, or infrastructure interference.',
+    'Once a candidate passes, report VERIFIED or PENDING_FINAL_REVERIFY as appropriate and stop retesting until the candidate or snapshot changes.',
+    'Send concrete failures directly to the responsible Implementor and material results to Coordinator or Integrator.',
+  ]),
+  integrator: Object.freeze([
+    'Integrate only candidates that have the required independent Review/Test evidence.',
+    'Maintain one canonical reconciled snapshot. Reject stale, mixed-snapshot, or superseded evidence rather than reconciling it implicitly.',
+    'When required implementation families are settled, publish the exact immutable HEAD, worktree/status identity, and candidate scope for final same-snapshot verification.',
+    'Do not implement missing fixes; route failures back to the appropriate specialist.',
+    'Once all required evidence is valid on the same snapshot, perform canonical integration or release and report the accepted state.',
+  ]),
+});
+
 const ROLE_IDS = new Set(ROLE_CATALOG.map((role) => role.id));
 const MAX_ROLE_COUNT = 16;
 const DEFAULT_ROLE_COUNTS = Object.freeze(Object.fromEntries(
@@ -540,13 +602,27 @@ function senderIdentityLabel(state, sender) {
 function roleContractPrompt(role, heading = 'Active role contract') {
   const contract = roleContract(role);
   return [
-    `${heading}: ${contract.label} (${contract.id})`,
-    `Purpose: ${contract.purpose}`,
-    `Authority scope: ${contract.authorityScope}`,
-    `Claim types: ${contract.claimTypes.join(', ')}`,
-    `Prohibited actions: ${contract.prohibitedActions.join('; ')}`,
-    `Allowed handoffs: ${contract.allowedHandoffs.join(', ')}`,
-    `Independent verification required: ${contract.requiresIndependentVerification ? 'yes' : 'no'}`,
+    heading + ': ' + contract.label + ' (' + contract.id + ')',
+    'Purpose: ' + contract.purpose,
+    'Authority scope: ' + contract.authorityScope,
+    'Claim types: ' + contract.claimTypes.join(', '),
+    'Prohibited actions: ' + contract.prohibitedActions.join('; '),
+    'Allowed handoffs: ' + contract.allowedHandoffs.join(', '),
+    'Independent verification required: ' + (contract.requiresIndependentVerification ? 'yes' : 'no'),
+    'Operating instructions:',
+    ...(ROLE_OPERATING_INSTRUCTIONS[contract.id] || []).map((instruction) => '- ' + instruction),
+  ].join('\n');
+}
+
+function workerRoleOperatingPrompt(worker) {
+  const contract = roleContract(worker && worker.role);
+  return [
+    '[MODEL FLEET ROLE OPERATING CONTRACT]',
+    ...COMMON_ROLE_OPERATING_INSTRUCTIONS.map((instruction) => '- ' + instruction),
+    '',
+    'Registered role: ' + contract.label + ' (' + contract.id + ')',
+    ...(ROLE_OPERATING_INSTRUCTIONS[contract.id] || []).map((instruction) => '- ' + instruction),
+    '[/MODEL FLEET ROLE OPERATING CONTRACT]',
   ].join('\n');
 }
 
@@ -1684,16 +1760,17 @@ function buildTaskPrompt(state, task, worker) {
     `Worker: ${worker.id}`,
     `Role: ${worker.role}`,
     `Requested task role: ${task.role}`,
-    `Active role contract purpose: ${taskContract.purpose}`,
-    `Active role authority scope: ${taskContract.authorityScope}`,
-    `Active role claim types: ${taskContract.claimTypes.join(', ')}`,
-    `Active role prohibited actions: ${taskContract.prohibitedActions.join('; ')}`,
-    `Active role allowed handoffs: ${taskContract.allowedHandoffs.join(', ')}`,
-    `Worker role contract: ${workerContract.purpose}; authority: ${workerContract.authorityScope}`,
+    `Requested task contract purpose: ${taskContract.purpose}`,
+    `Registered worker authority scope: ${workerContract.authorityScope}`,
+    `Registered worker claim types: ${workerContract.claimTypes.join(', ')}`,
+    `Registered worker prohibited actions: ${workerContract.prohibitedActions.join('; ')}`,
+    `Registered worker allowed handoffs: ${workerContract.allowedHandoffs.join(', ')}`,
     `Independent verification required: ${taskContract.requiresIndependentVerification ? 'yes' : 'no'}`,
     `Separation of duty: ${separationNote}`,
     `Task: ${task.id} — ${task.title}`,
     state.goal ? `Fleet goal: ${state.goal}` : 'Fleet goal: not set',
+    '',
+    workerRoleOperatingPrompt(worker),
     '',
     controlFeedback,
     controlFeedback ? '' : '',
@@ -1738,6 +1815,8 @@ function buildMessagePrompt(state, messageOrMessages, worker) {
       ? 'Process every message in this batch in the listed order during this single turn. Preserve each message identity and satisfy all non-conflicting instructions; do not require one ChatGPT turn per message.'
       : 'Process the message below during this turn.',
     '',
+    workerRoleOperatingPrompt(worker),
+    '',
     ...blocks,
     controlFeedback,
     controlFeedback ? '' : '',
@@ -1760,6 +1839,8 @@ function buildControlPrompt(state, worker) {
     '[MODEL FLEET MESSAGE]',
     `Recipient: ${workerIdentityLabel(state, worker)}`,
     'Batch size: 0 semantic messages',
+    '',
+    workerRoleOperatingPrompt(worker),
     '',
     controlFeedbackText(worker),
     '',

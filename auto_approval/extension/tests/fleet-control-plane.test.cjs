@@ -125,11 +125,11 @@ test('handoffs use effective task role and reject disallowed destinations', () =
 test('task prompt carries role contract and separation of duty', () => {
   const body = section('function buildTaskPrompt', 'function buildMessagePrompt');
   assert.match(body, /Requested task role:/);
-  assert.match(body, /Active role contract purpose:/);
-  assert.match(body, /Active role authority scope:/);
-  assert.match(body, /Active role claim types:/);
-  assert.match(body, /Active role prohibited actions:/);
-  assert.match(body, /Active role allowed handoffs:/);
+  assert.match(body, /Requested task contract purpose:/);
+  assert.match(body, /Registered worker authority scope:/);
+  assert.match(body, /Registered worker claim types:/);
+  assert.match(body, /Registered worker prohibited actions:/);
+  assert.match(body, /Registered worker allowed handoffs:/);
   assert.match(body, /Separation of duty:/);
 });
 
