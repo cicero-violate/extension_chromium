@@ -1,0 +1,21 @@
+const d = ["area", "base", "basefont", "bgsound", "br", "col", "command", "embed", "frame", "hr", "image", "img", "input", "keygen", "link", "meta", "param", "source", "track", "wbr"],
+    s = {}.hasOwnProperty;
+
+function h(i, c) {
+    const a = c || {};
+
+    function n(t, ...l) {
+        let e = n.invalid;
+        const o = n.handlers;
+        if (t && s.call(t, i)) {
+            const r = String(t[i]);
+            e = s.call(o, r) ? o[r] : n.unknown
+        }
+        if (e) return e.call(this, t, ...l)
+    }
+    return n.handlers = a.handlers || {}, n.invalid = a.invalid, n.unknown = a.unknown, n
+}
+export {
+    d as h, h as z
+};
+//# sourceMappingURL=1bc04b52-j8mdq0okhi6vw6kp.js.map

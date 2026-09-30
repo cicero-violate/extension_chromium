@@ -1,0 +1,5033 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/02833de5-dv0o4y10dk4nqsl1.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/02833de5\\-dv0o4y10dk4nqsl1\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 2,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/04581835-oeyn929df7afwo00.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/04581835\\-oeyn929df7afwo00\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 3,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/04aceeae-i9smgosz0rjfku3p.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/04aceeae\\-i9smgosz0rjfku3p\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 4,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/062ff9a0-e8d5ed45ec2nujap.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/062ff9a0\\-e8d5ed45ec2nujap\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 5,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/07d15c0a-iwqvt02p4gf8bqji.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/07d15c0a\\-iwqvt02p4gf8bqji\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 6,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/083c602a-m0dn1kn5cf8mgan0.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/083c602a\\-m0dn1kn5cf8mgan0\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 7,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/083e3de5-b8q60q8uxlyk4vk7.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/083e3de5\\-b8q60q8uxlyk4vk7\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 8,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/089c718c-l3mqz3tt2i5t2xnq.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/089c718c\\-l3mqz3tt2i5t2xnq\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 9,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/08b6430b-mphmvh7g1be7z3ap.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/08b6430b\\-mphmvh7g1be7z3ap\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 10,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/09f5ffef-n7w0jc63hnjzsrzv.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/09f5ffef\\-n7w0jc63hnjzsrzv\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 11,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/0a3e27b8-npag1tmffr7kps0t.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/0a3e27b8\\-npag1tmffr7kps0t\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 12,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/0a717d1e-09ybvrr05t1lv0x0.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/0a717d1e\\-09ybvrr05t1lv0x0\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 13,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/0f28d127-l3kclpo98h76r1qr.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/0f28d127\\-l3kclpo98h76r1qr\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 14,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/0fe285dc-ef2rid3r4goohlwz.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/0fe285dc\\-ef2rid3r4goohlwz\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 15,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/11defd9b-i32kqia8j0bubdw1.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/11defd9b\\-i32kqia8j0bubdw1\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 16,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1374e329-qvt9e0gdcdlluaod.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1374e329\\-qvt9e0gdcdlluaod\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 17,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/14069429-owsmrsu9dcrl2ylc.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/14069429\\-owsmrsu9dcrl2ylc\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 18,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/14a60637-ks75r8kvmgl13oz5.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/14a60637\\-ks75r8kvmgl13oz5\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 19,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/14bc6aa2-bza02350hmhi4c72.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/14bc6aa2\\-bza02350hmhi4c72\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 20,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/14f71e20-oiejkcbcinz69nah.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/14f71e20\\-oiejkcbcinz69nah\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 21,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/150f7f4e-532i7b7v2cgfoi3l.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/150f7f4e\\-532i7b7v2cgfoi3l\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 22,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1622ef1c-lbin4ocjqw0z4zbp.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1622ef1c\\-lbin4ocjqw0z4zbp\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 23,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/16d1c905-kzb9nx2txdax2vhp.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/16d1c905\\-kzb9nx2txdax2vhp\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 24,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/17eb3c01-l4k9yeo526nqvmve.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/17eb3c01\\-l4k9yeo526nqvmve\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 25,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/18e7d84e-eahv7dznhqoltf2t.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/18e7d84e\\-eahv7dznhqoltf2t\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 26,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/19334654-hpjwwuuf9gjvwupj.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/19334654\\-hpjwwuuf9gjvwupj\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 27,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1951ef38-oh93heirltpqy8iv.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1951ef38\\-oh93heirltpqy8iv\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 28,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/19ad7347-lm1i0g09rrp3wf61.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/19ad7347\\-lm1i0g09rrp3wf61\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 29,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/19cb8032-jpfqefpboeqjp2t3.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/19cb8032\\-jpfqefpboeqjp2t3\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 30,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/19eaf2e2-k0ggrn2d1am5t2f5.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/19eaf2e2\\-k0ggrn2d1am5t2f5\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 31,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1a1bda43-ccqt51bvbkt9kl39.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1a1bda43\\-ccqt51bvbkt9kl39\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 32,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1a5e078c-os7yi9hgehd2ixnd.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1a5e078c\\-os7yi9hgehd2ixnd\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 33,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1a7ebd5f-csmwtrlxfshzkvs8.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1a7ebd5f\\-csmwtrlxfshzkvs8\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 34,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-azjat95ys7fdae39.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-azjat95ys7fdae39\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 35,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-bmnuwl3vulk5l7qh.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-bmnuwl3vulk5l7qh\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 36,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-c6spp0aq3f71sxih.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-c6spp0aq3f71sxih\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 37,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-c842ajlk411j0plj.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-c842ajlk411j0plj\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 38,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-cvho6b74mdi8rq0h.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-cvho6b74mdi8rq0h\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 39,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-gtpe46xocf6zem4g.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-gtpe46xocf6zem4g\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 40,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-gvld45w9v7fqfedv.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-gvld45w9v7fqfedv\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 41,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-h1em0bjkpkjv8ykw.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-h1em0bjkpkjv8ykw\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 42,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-ha9q6d1g9p1sl7dr.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-ha9q6d1g9p1sl7dr\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 43,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-hg3ptm9pgpi9lcut.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-hg3ptm9pgpi9lcut\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 44,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-hnu6g21afx0au4ng.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-hnu6g21afx0au4ng\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 45,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-homyy2s5cy2i6moh.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-homyy2s5cy2i6moh\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 46,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-hpmor2vxay5xyk5e.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-hpmor2vxay5xyk5e\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 47,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-htrlynm8a3t36dsr.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-htrlynm8a3t36dsr\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 48,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-i0x0p81rb595org5.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-i0x0p81rb595org5\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 49,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-ito2hkknjg6g2mv8.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-ito2hkknjg6g2mv8\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 50,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-j8mdq0okhi6vw6kp.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-j8mdq0okhi6vw6kp\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 51,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-jkdznw8znv9rgv81.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-jkdznw8znv9rgv81\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 52,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-jxd082ldak294kcc.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-jxd082ldak294kcc\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 53,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-ktky0fctjapxchyv.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-ktky0fctjapxchyv\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 54,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-lymnctp12j4ukscl.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-lymnctp12j4ukscl\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 55,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-nn3a79pgrrxatkgx.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-nn3a79pgrrxatkgx\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 56,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-pfqcgruptyx7togk.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-pfqcgruptyx7togk\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 57,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1bc04b52-ud6fhzv6uahbvpse.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1bc04b52\\-ud6fhzv6uahbvpse\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 58,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1c86a5ac-l4l9bb8zn1n6pjie.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1c86a5ac\\-l4l9bb8zn1n6pjie\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 59,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1ca89623-byl3shz7dia9on13.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1ca89623\\-byl3shz7dia9on13\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 60,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1d317354-b79iqvpdq5pcy4os.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1d317354\\-b79iqvpdq5pcy4os\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 61,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1dc5ae5b-gn7rb0zr8oc6ne6j.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1dc5ae5b\\-gn7rb0zr8oc6ne6j\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 62,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1e4de2e8-j6rhseu7vp6ldb57.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1e4de2e8\\-j6rhseu7vp6ldb57\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 63,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1e924491-oclxttbn9pyl5l8t.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1e924491\\-oclxttbn9pyl5l8t\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 64,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1f1c5b2f-o7b23h45sqdl8wun.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1f1c5b2f\\-o7b23h45sqdl8wun\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 65,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/1f30e218-lhaiclj6u6v5ivxw.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/1f30e218\\-lhaiclj6u6v5ivxw\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 66,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/200313d5-pcfdrmdp92b52l9u.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/200313d5\\-pcfdrmdp92b52l9u\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 67,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/20b859e0-gykwswuufj2yhl9f.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/20b859e0\\-gykwswuufj2yhl9f\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 68,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/2210195a-i10uk4j9say0d0zg.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/2210195a\\-i10uk4j9say0d0zg\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 69,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/22724723-hcq7pr9e9rdzi53r.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/22724723\\-hcq7pr9e9rdzi53r\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 70,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/22bcb108-hg0t6dqu6lx2662h.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/22bcb108\\-hg0t6dqu6lx2662h\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 71,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/2340486e-dvd8m80i7d6hyild.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/2340486e\\-dvd8m80i7d6hyild\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 72,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/239f44f1-mbmcx8v24u1ao1ke.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/239f44f1\\-mbmcx8v24u1ao1ke\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 73,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/2478e8be-fu39n45z77ccw3bg.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/2478e8be\\-fu39n45z77ccw3bg\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 74,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/24c0da2c-hj4mjwclnymu5j2r.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/24c0da2c\\-hj4mjwclnymu5j2r\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 75,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/25de328f-ebweaz4po5j1x1mo.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/25de328f\\-ebweaz4po5j1x1mo\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 76,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/25e69e8b-nak5n78ns73kii17.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/25e69e8b\\-nak5n78ns73kii17\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 77,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/2657e442-ol3fn895ivtu1x4l.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/2657e442\\-ol3fn895ivtu1x4l\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 78,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/26b47209-lemdmpf742pvpkux.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/26b47209\\-lemdmpf742pvpkux\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 79,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/26c0a75b-ohajenatbq3bkll5.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/26c0a75b\\-ohajenatbq3bkll5\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 80,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/28938d3c-ntjvzk8j4ndk27zo.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/28938d3c\\-ntjvzk8j4ndk27zo\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 81,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/2ac7f54f-dph6j3jcg26rifm2.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/2ac7f54f\\-dph6j3jcg26rifm2\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 82,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/2af37e0b-b7nq4r5vunpqrfv4.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/2af37e0b\\-b7nq4r5vunpqrfv4\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 83,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/2b85cfea-my3q0touorcy6b6l.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/2b85cfea\\-my3q0touorcy6b6l\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 84,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/2c0ba89a-olv5e457apiuximf.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/2c0ba89a\\-olv5e457apiuximf\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 85,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/2c5c5d1e-ek542ter6dw68o7g.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/2c5c5d1e\\-ek542ter6dw68o7g\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 86,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/301efb8d-h2phjphksb9we6u5.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/301efb8d\\-h2phjphksb9we6u5\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 87,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/306af1b9-mg2gccoa0rzfizi3.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/306af1b9\\-mg2gccoa0rzfizi3\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 88,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/31cec8d8-j4linhdlo3s8o8v8.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/31cec8d8\\-j4linhdlo3s8o8v8\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 89,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/32867333-oem65mfnc75cw7w7.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/32867333\\-oem65mfnc75cw7w7\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 90,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/34eaae60-5kedagn441hgxh5i.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/34eaae60\\-5kedagn441hgxh5i\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 91,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/356eccf2-efctq4327o59mtce.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/356eccf2\\-efctq4327o59mtce\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 92,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/36f1c3de-lha4u3glrujfne94.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/36f1c3de\\-lha4u3glrujfne94\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 93,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/373ddd65-f76gy0b8ieo4s693.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/373ddd65\\-f76gy0b8ieo4s693\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 94,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/37827fd8-na0njwv6fxmwz5r3.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/37827fd8\\-na0njwv6fxmwz5r3\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 95,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/378f37b1-mia7qmdupqoji40k.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/378f37b1\\-mia7qmdupqoji40k\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 96,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/38b1cb71-fzxhpchabhdp967b.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/38b1cb71\\-fzxhpchabhdp967b\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 97,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/38e61b13-gvzgb5vtqjj2oi6o.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/38e61b13\\-gvzgb5vtqjj2oi6o\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 98,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/3ff7962d-gzwjcaak7c84f36u.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/3ff7962d\\-gzwjcaak7c84f36u\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 99,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/411304d4-l2o3ynhpzevzmar6.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/411304d4\\-l2o3ynhpzevzmar6\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 100,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/4143cd04-sz27yw79gcaafjvf.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/4143cd04\\-sz27yw79gcaafjvf\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 101,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/416006a5-op0fk850e02r5e8e.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/416006a5\\-op0fk850e02r5e8e\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 102,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/41a2fdf3-im11ns7i6t39a3tt.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/41a2fdf3\\-im11ns7i6t39a3tt\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 103,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/45d3a556-j5mgck78pv15jtdk.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/45d3a556\\-j5mgck78pv15jtdk\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 104,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/45f779e8-dpcfl6fux1xizeah.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/45f779e8\\-dpcfl6fux1xizeah\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 105,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/46a4eebd-dp58yi3ebjz6lx0x.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/46a4eebd\\-dp58yi3ebjz6lx0x\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 106,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/46a63953-lu2cowywu3ieob17.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/46a63953\\-lu2cowywu3ieob17\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 107,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/4701097e-fcrkpu9i1g9psrli.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/4701097e\\-fcrkpu9i1g9psrli\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 108,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/47b5158d-lwpqmbglilo75anj.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/47b5158d\\-lwpqmbglilo75anj\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 109,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/47edf3d1-kep97c5boao7mh9l.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/47edf3d1\\-kep97c5boao7mh9l\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 110,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/4813494d-javwxs2rmzsrunl2.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/4813494d\\-javwxs2rmzsrunl2\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 111,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/4813494d-lavfi1ibeyheaotg.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/4813494d\\-lavfi1ibeyheaotg\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 112,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/4851d730-f6t0vxg3tipt77fz.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/4851d730\\-f6t0vxg3tipt77fz\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 113,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/48fd09b9-hd5x0odfr6dgdtaz.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/48fd09b9\\-hd5x0odfr6dgdtaz\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 114,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/498cd593-yz9evo13anvr9ant.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/498cd593\\-yz9evo13anvr9ant\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 115,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/49a063ae-bppts8h83qguptke.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/49a063ae\\-bppts8h83qguptke\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 116,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/4b303e9e-iimph5klvq8yx43j.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/4b303e9e\\-iimph5klvq8yx43j\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 117,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/4c806318-j1zaw577xwxm6ksd.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/4c806318\\-j1zaw577xwxm6ksd\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 118,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/4d59f34c-f1cfd9xew7qks3jb.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/4d59f34c\\-f1cfd9xew7qks3jb\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 119,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/5122872a-nypuctj6mwd8megp.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/5122872a\\-nypuctj6mwd8megp\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 120,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/52022a5f-jdp1c9qxwc35bble.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/52022a5f\\-jdp1c9qxwc35bble\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 121,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/52047a56-czi1dhw7htgh636e.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/52047a56\\-czi1dhw7htgh636e\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 122,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/5240f773-onb94gf2mec5uo8x.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/5240f773\\-onb94gf2mec5uo8x\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 123,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/52878ea3-gn3j7ui61y2jybs7.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/52878ea3\\-gn3j7ui61y2jybs7\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 124,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/52989639-omcb7l87o7xtc1n2.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/52989639\\-omcb7l87o7xtc1n2\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 125,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/52ac6121-m7z0qcro3hdwwo6n.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/52ac6121\\-m7z0qcro3hdwwo6n\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 126,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/5373c7f8-h4l09ncnnop7wabg.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/5373c7f8\\-h4l09ncnnop7wabg\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 127,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/53ae691e-bsyqlm293qvxnzel.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/53ae691e\\-bsyqlm293qvxnzel\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 128,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/540191af-eyt4mhgiscgde9oh.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/540191af\\-eyt4mhgiscgde9oh\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 129,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/54d21dcb-lxup7vl8076a6e6t.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/54d21dcb\\-lxup7vl8076a6e6t\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 130,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/54e99289-ca3qg9ztsk0rckpc.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/54e99289\\-ca3qg9ztsk0rckpc\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 131,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/55c84557-fg0eo4a50l6xggrj.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/55c84557\\-fg0eo4a50l6xggrj\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 132,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/58ab20f4-cvcq70132cgmqb2g.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/58ab20f4\\-cvcq70132cgmqb2g\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 133,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/58c15f95-e3yoo2duc6sgaog5.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/58c15f95\\-e3yoo2duc6sgaog5\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 134,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/58cf4120-j76sbnb31d6rrn3i.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/58cf4120\\-j76sbnb31d6rrn3i\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 135,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/5955c2e7-bm7q695htcpusowj.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/5955c2e7\\-bm7q695htcpusowj\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 136,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/5983c1e5-d8kn80dssel0a0ls.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/5983c1e5\\-d8kn80dssel0a0ls\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 137,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/5bcaa99f-j752ivjoa76w7q31.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/5bcaa99f\\-j752ivjoa76w7q31\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 138,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/5ced9fb2-gdlkfe6m7icygyhv.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/5ced9fb2\\-gdlkfe6m7icygyhv\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 139,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/5eec0dc4-8scuipden3df4f93.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/5eec0dc4\\-8scuipden3df4f93\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 140,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/5f339043-i2plq24dcvkaat52.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/5f339043\\-i2plq24dcvkaat52\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 141,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/5ff05818-cf0xcd1p0waiidym.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/5ff05818\\-cf0xcd1p0waiidym\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 142,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/5ff8b827-dbgyxtmq8d9vjx7i.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/5ff8b827\\-dbgyxtmq8d9vjx7i\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 143,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/605b091d-ifqjdw7ydae262j8.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/605b091d\\-ifqjdw7ydae262j8\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 144,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/61aaacec-iflrbdc4wi4m160d.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/61aaacec\\-iflrbdc4wi4m160d\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 145,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/639f3965-b3su8b9x8futk8iq.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/639f3965\\-b3su8b9x8futk8iq\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 146,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/64696494-pcb5zbgdswo1x3cx.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/64696494\\-pcb5zbgdswo1x3cx\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 147,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/64d46afb-iej0cupg2dqkmejt.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/64d46afb\\-iej0cupg2dqkmejt\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 148,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/65d684aa-lfcsad63o8z9w3e0.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/65d684aa\\-lfcsad63o8z9w3e0\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 149,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/66c6e910-ol9d5wxhynx9q2is.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/66c6e910\\-ol9d5wxhynx9q2is\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 150,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/677acd42-bn1yi1ernukdhe14.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/677acd42\\-bn1yi1ernukdhe14\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 151,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/679fc303-kl7c6054usfnqmd4.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/679fc303\\-kl7c6054usfnqmd4\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 152,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/67fb493c-izyvw865ff3eh6ob.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/67fb493c\\-izyvw865ff3eh6ob\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 153,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/6a35ae8e-iy63tz3yb9ue6t0y.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/6a35ae8e\\-iy63tz3yb9ue6t0y\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 154,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/6b0acf80-v75u2yrmjosfantg.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/6b0acf80\\-v75u2yrmjosfantg\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 155,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/6cb4c679-fplf101jkz4oo0d4.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/6cb4c679\\-fplf101jkz4oo0d4\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 156,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/6cb574fa-ewz4lvzvh0154hdn.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/6cb574fa\\-ewz4lvzvh0154hdn\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 157,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/6cbb6eaf-hqe4w67ks2ili42q.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/6cbb6eaf\\-hqe4w67ks2ili42q\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 158,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/6ea54f65-illup25mch4zeu08.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/6ea54f65\\-illup25mch4zeu08\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 159,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/6ec7331b-j9ru632hq8v8xvo9.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/6ec7331b\\-j9ru632hq8v8xvo9\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 160,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/6ee9bd33-eye21sqplbfe3iul.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/6ee9bd33\\-eye21sqplbfe3iul\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 161,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/6f5b64a6-l63hg0ot5ed5qnwo.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/6f5b64a6\\-l63hg0ot5ed5qnwo\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 162,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/6fd89734-beaqo25ksg3811yj.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/6fd89734\\-beaqo25ksg3811yj\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 163,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/6fd89734-e246szx8pk7yijni.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/6fd89734\\-e246szx8pk7yijni\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 164,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/6fd89734-ghfoi7e1ajqagqxe.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/6fd89734\\-ghfoi7e1ajqagqxe\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 165,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/6fd89734-he7d0krbclzsprbo.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/6fd89734\\-he7d0krbclzsprbo\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 166,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/6fd89734-ivsscv8296nz7zhh.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/6fd89734\\-ivsscv8296nz7zhh\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 167,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/6fd89734-ka2f78fh5448oyj6.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/6fd89734\\-ka2f78fh5448oyj6\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 168,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/6ffe46c3-m3dgqn394f1moivn.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/6ffe46c3\\-m3dgqn394f1moivn\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 169,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/7018830a-c7k7fy0uxbzgl2y5.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/7018830a\\-c7k7fy0uxbzgl2y5\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 170,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/74006267-m5l37lodlljn1srb.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/74006267\\-m5l37lodlljn1srb\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 171,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/7517017f-efd9iwaiway92n98.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/7517017f\\-efd9iwaiway92n98\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 172,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/76527257-cpwybk70pkgunsyf.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/76527257\\-cpwybk70pkgunsyf\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 173,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/77a251d8-ki2u6aaeuhtt02gd.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/77a251d8\\-ki2u6aaeuhtt02gd\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 174,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/781797c9-j3ifxdswmznku0vx.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/781797c9\\-j3ifxdswmznku0vx\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 175,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/78c2d596-c7gi8g89xe9hpsf2.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/78c2d596\\-c7gi8g89xe9hpsf2\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 176,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/79f982eb-ml1kmcaq3unqs1sp.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/79f982eb\\-ml1kmcaq3unqs1sp\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 177,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/7bce51e5-cmbyyrv67x3n5nrc.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/7bce51e5\\-cmbyyrv67x3n5nrc\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 178,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/7d7b57e4-fft59e56sdckq2uk.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/7d7b57e4\\-fft59e56sdckq2uk\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 179,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/7f00cfec-f04y2v5idy58f22s.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/7f00cfec\\-f04y2v5idy58f22s\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 180,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/821579c7-japk0omg1m8lct5s.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/821579c7\\-japk0omg1m8lct5s\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 181,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/82244417-gtg7yq4t8dhuwljw.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/82244417\\-gtg7yq4t8dhuwljw\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 182,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/82d09521-lr5i67hbagw70kyh.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/82d09521\\-lr5i67hbagw70kyh\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 183,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/83a5e40a-n0dw3duo9jw1ac7o.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/83a5e40a\\-n0dw3duo9jw1ac7o\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 184,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/83e88bf5-fnc6zyne0o33hu7n.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/83e88bf5\\-fnc6zyne0o33hu7n\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 185,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/84983163-gan1f9ordoegunfq.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/84983163\\-gan1f9ordoegunfq\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 186,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/84e8f385-lndtlkfi7kijfbdy.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/84e8f385\\-lndtlkfi7kijfbdy\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 187,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/8563df09-kcler8l9pghj0vzm.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/8563df09\\-kcler8l9pghj0vzm\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 188,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/85c26ade-bczgchfb7yqtvm1w.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/85c26ade\\-bczgchfb7yqtvm1w\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 189,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/85c35906-b3f2xgnap0dhbanv.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/85c35906\\-b3f2xgnap0dhbanv\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 190,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/85f3cacd-86tdbr0rb4xbpews.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/85f3cacd\\-86tdbr0rb4xbpews\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 191,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/8799acd7-ocfyzbsyvkoedxba.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/8799acd7\\-ocfyzbsyvkoedxba\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 192,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/880eb4dc-e1dniulzyhjekor0.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/880eb4dc\\-e1dniulzyhjekor0\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 193,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/881648b6-ighgvbrp6yyqupn4.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/881648b6\\-ighgvbrp6yyqupn4\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 194,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/8a0ea239-e4wrtq50jjqmk3pj.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/8a0ea239\\-e4wrtq50jjqmk3pj\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 195,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/8a10ee4a-fo1o4uf1uo7zqngr.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/8a10ee4a\\-fo1o4uf1uo7zqngr\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 196,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/8ad92f11-dff614f59ztoslhd.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/8ad92f11\\-dff614f59ztoslhd\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 197,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/8b7f0dc9-etsrdv5zrmr52uze.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/8b7f0dc9\\-etsrdv5zrmr52uze\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 198,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/8d5bfd5c-d7hxn1ii4mmlof5q.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/8d5bfd5c\\-d7hxn1ii4mmlof5q\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 199,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/8d846022-abx0in25q9ocxjad.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/8d846022\\-abx0in25q9ocxjad\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 200,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/8d846022-bpect2mtc2esvt45.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/8d846022\\-bpect2mtc2esvt45\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 201,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/8d846022-n379etekqsymvq1f.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/8d846022\\-n379etekqsymvq1f\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 202,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/8f71ba8b-ir8722agkyx3m2ag.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/8f71ba8b\\-ir8722agkyx3m2ag\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 203,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/902eb77e-cyhiyo0iarrb7zu1.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/902eb77e\\-cyhiyo0iarrb7zu1\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 204,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/91969468-lcw0ql9lsgjnwz6c.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/91969468\\-lcw0ql9lsgjnwz6c\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 205,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/929b8f98-n5a152jpew1p3rsl.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/929b8f98\\-n5a152jpew1p3rsl\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 206,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/93027c7b-etvzqqdjohk7fflh.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/93027c7b\\-etvzqqdjohk7fflh\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 207,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/931fef96-kim99dnpxqj86t8u.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/931fef96\\-kim99dnpxqj86t8u\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 208,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/93527649-ioteucsxyug3nhyc.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/93527649\\-ioteucsxyug3nhyc\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 209,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/93b8edb0-i4v0k7e37nk0jqqy.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/93b8edb0\\-i4v0k7e37nk0jqqy\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 210,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/94298aad-kxzt3vqi6qn02rqg.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/94298aad\\-kxzt3vqi6qn02rqg\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 211,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/943d6b1c-egk9di0nscfiahtx.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/943d6b1c\\-egk9di0nscfiahtx\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 212,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/94e0eb8c-fpnlthqv7c3yeffk.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/94e0eb8c\\-fpnlthqv7c3yeffk\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 213,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/9521ff6d-cy066hy1jl6r8zjn.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/9521ff6d\\-cy066hy1jl6r8zjn\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 214,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/966cd1fb-nah2h9xzpew8gg10.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/966cd1fb\\-nah2h9xzpew8gg10\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 215,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/97587f90-ossabf8p826uhphr.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/97587f90\\-ossabf8p826uhphr\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 216,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/97db0fda-m2ghqmcv3nlpdg28.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/97db0fda\\-m2ghqmcv3nlpdg28\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 217,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/986bf68a-i1zk1h1dxz2l3vy4.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/986bf68a\\-i1zk1h1dxz2l3vy4\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 218,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/9bee0952-mp1gcgn6jckvpws6.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/9bee0952\\-mp1gcgn6jckvpws6\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 219,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/9c5a2fed-mtogxpsrx5su7i10.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/9c5a2fed\\-mtogxpsrx5su7i10\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 220,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/9d85046f-o2skrkwdyvarlh1p.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/9d85046f\\-o2skrkwdyvarlh1p\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 221,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/9e6b8179-eyitb5m4jk5hlrbu.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/9e6b8179\\-eyitb5m4jk5hlrbu\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 222,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/9ed9a415-g39uishgri10upf4.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/9ed9a415\\-g39uishgri10upf4\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 223,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/a24a6b0e-bqz8i0dx9sfl7wz5.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/a24a6b0e\\-bqz8i0dx9sfl7wz5\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 224,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/a2e12fbe-efn5f3ec8mo4hr2i.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/a2e12fbe\\-efn5f3ec8mo4hr2i\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 225,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/a35b0b5c-c4d5x0qzgpq8r7ek.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/a35b0b5c\\-c4d5x0qzgpq8r7ek\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 226,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/a366adf3-mr5j0wy96h4uuta9.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/a366adf3\\-mr5j0wy96h4uuta9\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 227,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/a46d2176-eiofepfdbe1v31zl.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/a46d2176\\-eiofepfdbe1v31zl\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 228,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/a4d26868-b1n5zb5pfqw48lrd.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/a4d26868\\-b1n5zb5pfqw48lrd\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 229,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/a4ef304b-bcc1699tskmhgi50.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/a4ef304b\\-bcc1699tskmhgi50\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 230,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/a5a34a94-b5yp7j7i5ruawca9.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/a5a34a94\\-b5yp7j7i5ruawca9\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 231,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/a78c9467-je3wph62mw4wgyxb.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/a78c9467\\-je3wph62mw4wgyxb\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 232,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/a78f4c52-jscmw6qy016v67a7.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/a78f4c52\\-jscmw6qy016v67a7\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 233,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/a7a937ee-h49d8m2vmnk2eyrr.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/a7a937ee\\-h49d8m2vmnk2eyrr\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 234,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/a7c981c9-cfqk1lewr9pd0yee.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/a7c981c9\\-cfqk1lewr9pd0yee\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 235,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/a848d420-lbkdkb7mrbs1b0o6.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/a848d420\\-lbkdkb7mrbs1b0o6\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 236,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/a89794b1-iid29x3u23vy2xh2.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/a89794b1\\-iid29x3u23vy2xh2\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 237,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/a8d66c03-d8ufu6rsnqig4xxm.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/a8d66c03\\-d8ufu6rsnqig4xxm\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 238,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/a8e729b2-g28kd33mnyafvoxt.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/a8e729b2\\-g28kd33mnyafvoxt\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 239,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/a9c4a648-l2sjt80qz3kgccoj.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/a9c4a648\\-l2sjt80qz3kgccoj\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 240,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/aa6b223c-hs6eburv6qzq238w.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/aa6b223c\\-hs6eburv6qzq238w\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 241,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/aaa2d182-da7hz3gf5lvb4501.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/aaa2d182\\-da7hz3gf5lvb4501\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 242,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/ab750810-c6c8o97xy0a4lr6p.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/ab750810\\-c6c8o97xy0a4lr6p\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 243,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/ac827dee-ni0c24kw46bltvi6.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/ac827dee\\-ni0c24kw46bltvi6\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 244,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/ad08b33f-m6y61lzfmpdxz75y.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/ad08b33f\\-m6y61lzfmpdxz75y\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 245,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/ad0d1100-nqrnatetfetb9scp.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/ad0d1100\\-nqrnatetfetb9scp\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 246,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/adcea219-dtovp7irxcfumxuw.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/adcea219\\-dtovp7irxcfumxuw\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 247,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/ae144ef6-emto7smim17okthn.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/ae144ef6\\-emto7smim17okthn\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 248,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/af004db9-d3svat17gfrlvrrt.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/af004db9\\-d3svat17gfrlvrrt\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 249,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/af1d6752-l1jen9j8o9ok5rzx.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/af1d6752\\-l1jen9j8o9ok5rzx\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 250,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/af7de5ed-hluw7l4ayzlk3ze4.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/af7de5ed\\-hluw7l4ayzlk3ze4\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 251,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/af9954cd-e37kmcjwfqr23m2p.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/af9954cd\\-e37kmcjwfqr23m2p\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 252,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/ansi-1f6vhsjh.css"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/ansi\\-1f6vhsjh\\.css(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 253,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/b107ee61-gizrb9rp4tlonayy.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/b107ee61\\-gizrb9rp4tlonayy\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 254,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/b18a606b-lmom71hdnbtl4e60.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/b18a606b\\-lmom71hdnbtl4e60\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 255,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/b288024a-hvsuegpzdra9csyb.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/b288024a\\-hvsuegpzdra9csyb\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 256,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/b353a040-oc8fgx39stmfth5e.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/b353a040\\-oc8fgx39stmfth5e\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 257,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/b38665c9-u4u3ze884ld5k1u4.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/b38665c9\\-u4u3ze884ld5k1u4\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 258,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/b3e7be71-gystmeo88o0o4s5n.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/b3e7be71\\-gystmeo88o0o4s5n\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 259,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/b3eff28a-grxht9o14my36p69.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/b3eff28a\\-grxht9o14my36p69\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 260,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/b4b33d24-gmtao57w66kydx8j.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/b4b33d24\\-gmtao57w66kydx8j\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 261,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/b4c3a217-wf4fzdto4ed5hgv0.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/b4c3a217\\-wf4fzdto4ed5hgv0\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 262,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/b533a235-kx0w7bxpvn5r4lo4.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/b533a235\\-kx0w7bxpvn5r4lo4\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 263,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/b7675d69-jb593urz5i2ck6iz.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/b7675d69\\-jb593urz5i2ck6iz\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 264,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/b7bb170e-frl2lsl72w94djaw.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/b7bb170e\\-frl2lsl72w94djaw\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 265,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/b81d67c1-edign3dbahpky6bz.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/b81d67c1\\-edign3dbahpky6bz\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 266,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/b8ba2ec7-b3h6sni00olgnf96.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/b8ba2ec7\\-b3h6sni00olgnf96\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 267,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/b8bdca63-g3e309zdrjijhnw8.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/b8bdca63\\-g3e309zdrjijhnw8\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 268,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/b8d51478-eia71ltzneqisl3n.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/b8d51478\\-eia71ltzneqisl3n\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 269,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/b8f3be97-cabh0vwwkxj2eime.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/b8f3be97\\-cabh0vwwkxj2eime\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 270,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/b9e74381-im85lkncbx47l1ca.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/b9e74381\\-im85lkncbx47l1ca\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 271,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/b9ebfa06-dm8xq0zfweyjlyrr.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/b9ebfa06\\-dm8xq0zfweyjlyrr\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 272,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/ba0ab623-b72nt1bc6z5v8q9y.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/ba0ab623\\-b72nt1bc6z5v8q9y\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 273,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/bab22af5-eqmjf43rk6krbg5k.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/bab22af5\\-eqmjf43rk6krbg5k\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 274,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/bc18f706-ctivje9d0t0qyr68.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/bc18f706\\-ctivje9d0t0qyr68\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 275,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/bc4efe0c-ef367v6adi8m1l4b.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/bc4efe0c\\-ef367v6adi8m1l4b\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 276,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/bd382fd5-bcke632cms89jbha.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/bd382fd5\\-bcke632cms89jbha\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 277,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/bf706fa7-e3bui5cvgdm7izni.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/bf706fa7\\-e3bui5cvgdm7izni\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 278,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/c09d86e5-wq4gzqnoxnkj8lzz.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/c09d86e5\\-wq4gzqnoxnkj8lzz\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 279,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/c0a6f1bf-i8ofb6h61nprdqec.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/c0a6f1bf\\-i8ofb6h61nprdqec\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 280,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/c0e725d7-h370k1wse4qy92bx.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/c0e725d7\\-h370k1wse4qy92bx\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 281,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/c19d65aa-ef21vpc58mb9d70k.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/c19d65aa\\-ef21vpc58mb9d70k\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 282,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/c3423c08-i0d5n3e8oyxmy3j4.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/c3423c08\\-i0d5n3e8oyxmy3j4\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 283,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/c41e33f5-ibnnr1vsfllithl8.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/c41e33f5\\-ibnnr1vsfllithl8\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 284,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/c4ec2cfc-ifp37lczikg7mu97.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/c4ec2cfc\\-ifp37lczikg7mu97\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 285,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/c50694f1-efc0umb4i9cif66s.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/c50694f1\\-efc0umb4i9cif66s\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 286,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/c60851bc-l8eml0fjdavi50rk.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/c60851bc\\-l8eml0fjdavi50rk\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 287,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/c7cf66a1-lxlkkugldrmvojpt.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/c7cf66a1\\-lxlkkugldrmvojpt\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 288,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/c816d342-i01x53wgy40jgq48.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/c816d342\\-i01x53wgy40jgq48\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 289,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/c8503b70-cdz59z0vq5rtsgxa.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/c8503b70\\-cdz59z0vq5rtsgxa\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 290,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/c8d36e23-ccuyzajtuddlftds.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/c8d36e23\\-ccuyzajtuddlftds\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 291,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/c8f38d6c-i5s9j3oolp7zpjbo.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/c8f38d6c\\-i5s9j3oolp7zpjbo\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 292,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/cad56d82-peovrk2gl7vkk957.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/cad56d82\\-peovrk2gl7vkk957\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 293,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/cb241c69-g0cmr91t06tc1osg.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/cb241c69\\-g0cmr91t06tc1osg\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 294,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/ccd1f9f1-czalikjn2dri5qlk.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/ccd1f9f1\\-czalikjn2dri5qlk\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 295,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/ce52ae67-pc2givv05uuq8g6l.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/ce52ae67\\-pc2givv05uuq8g6l\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 296,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/cedbe818-h2t8e4spzi3rf7zt.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/cedbe818\\-h2t8e4spzi3rf7zt\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 297,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/cf038c1b-epekr7vyigt56mwt.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/cf038c1b\\-epekr7vyigt56mwt\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 298,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/cf64444f-b0z8ffdp5xu532do.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/cf64444f\\-b0z8ffdp5xu532do\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 299,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/code-block-dop2czwo.css"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/code\\-block\\-dop2czwo\\.css(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 300,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/code-block-viewer-bb2wmqiy.css"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/code\\-block\\-viewer\\-bb2wmqiy\\.css(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 301,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/conversation-small-cqp6votf.css"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/conversation\\-small\\-cqp6votf\\.css(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 302,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/d4fd05ef-jcd8acyt60dknv7p.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/d4fd05ef\\-jcd8acyt60dknv7p\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 303,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/d5b1a7e0-di9ny29tenjwy6rl.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/d5b1a7e0\\-di9ny29tenjwy6rl\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 304,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/d5fa12f2-jwpmhuor5ljwmxl3.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/d5fa12f2\\-jwpmhuor5ljwmxl3\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 305,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/d70d5a79-mdlj2wo46kax6t6t.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/d70d5a79\\-mdlj2wo46kax6t6t\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 306,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/d73aecd6-o5t2hpwcdqdyumaf.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/d73aecd6\\-o5t2hpwcdqdyumaf\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 307,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/d78de925-ndlhhwg0s1xaqdw6.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/d78de925\\-ndlhhwg0s1xaqdw6\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 308,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/d93502a4-kb9e349iy8dy3l12.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/d93502a4\\-kb9e349iy8dy3l12\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 309,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/d9c77c9b-n2xhmb28raiv0up9.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/d9c77c9b\\-n2xhmb28raiv0up9\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 310,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/da39060d-pev6u3jq0nawzolv.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/da39060d\\-pev6u3jq0nawzolv\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 311,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/daf50f1d-kdq76fgiseqm0e6u.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/daf50f1d\\-kdq76fgiseqm0e6u\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 312,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/db62250d-jvde196a4722ll12.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/db62250d\\-jvde196a4722ll12\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 313,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/dbb95ee5-os3gqq1d4z22oosn.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/dbb95ee5\\-os3gqq1d4z22oosn\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 314,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/dc4ecf2f-itcx2r0rs2xv69mk.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/dc4ecf2f\\-itcx2r0rs2xv69mk\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 315,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/dcadf3b0-bn6a8zmyx2ysg1i5.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/dcadf3b0\\-bn6a8zmyx2ysg1i5\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 316,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/dccfc4ad-llwbwazdbw44tz1f.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/dccfc4ad\\-llwbwazdbw44tz1f\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 317,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/de6c4a91-ewa7my738fxqmse2.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/de6c4a91\\-ewa7my738fxqmse2\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 318,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/df4a2937-mpi82nqqb645ej0m.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/df4a2937\\-mpi82nqqb645ej0m\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 319,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e04c699b-c1yj8j54x1smqexb.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e04c699b\\-c1yj8j54x1smqexb\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 320,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e0691314-7ap28aee1r7qlm05.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e0691314\\-7ap28aee1r7qlm05\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 321,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e1d1ae28-lk73qwfctl3clvqu.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e1d1ae28\\-lk73qwfctl3clvqu\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 322,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e21b3b3f-kmcsjww08yol2h37.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e21b3b3f\\-kmcsjww08yol2h37\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 323,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e2a9a3b9-elvt9b2xa2tub7jv.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e2a9a3b9\\-elvt9b2xa2tub7jv\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 324,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e3127a4c-3902zdnsjvimocyi.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e3127a4c\\-3902zdnsjvimocyi\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 325,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e340fd71-h0qop3v8adxc0jv0.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e340fd71\\-h0qop3v8adxc0jv0\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 326,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e3552ca3-ebkehufb7uydujg2.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e3552ca3\\-ebkehufb7uydujg2\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 327,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e3f71c51-lr1kx59sxbu52hj8.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e3f71c51\\-lr1kx59sxbu52hj8\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 328,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e4904c67-laejzp6xfq37q0u3.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e4904c67\\-laejzp6xfq37q0u3\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 329,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e5d54aa7-km6nxu8kh9k1ioef.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e5d54aa7\\-km6nxu8kh9k1ioef\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 330,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e65185e9-gmp7ahimw59dbft6.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e65185e9\\-gmp7ahimw59dbft6\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 331,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e700964e-ntd8bvrsamyzzorh.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e700964e\\-ntd8bvrsamyzzorh\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 332,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e7a416e4-lwnhgy5dnf3htcv0.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e7a416e4\\-lwnhgy5dnf3htcv0\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 333,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e7cab7fd-nld2cast1kvcpgmh.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e7cab7fd\\-nld2cast1kvcpgmh\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 334,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e802fc66-icima1dn58d02dbp.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e802fc66\\-icima1dn58d02dbp\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 335,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e8b55dd1-0egvp6sbx7ge01os.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e8b55dd1\\-0egvp6sbx7ge01os\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 336,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e8eebcb1-hl1q1mqbpavqpner.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e8eebcb1\\-hl1q1mqbpavqpner\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 337,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e8fe533b-dqowgzb88uo0tkty.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e8fe533b\\-dqowgzb88uo0tkty\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 338,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e9213bfa-drjldekxa18no8cz.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e9213bfa\\-drjldekxa18no8cz\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 339,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/e9c129e0-obrrz3bfgobj5kgi.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/e9c129e0\\-obrrz3bfgobj5kgi\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 340,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/eac2baa9-jgx1q6pqoyvja6z3.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/eac2baa9\\-jgx1q6pqoyvja6z3\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 341,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/eb34548a-micz69xe9kl22112.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/eb34548a\\-micz69xe9kl22112\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 342,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/ecab41d6-fnij669o94ytz9r7.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/ecab41d6\\-fnij669o94ytz9r7\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 343,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/ecba71b4-jgxp9f97lbrsokiw.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/ecba71b4\\-jgxp9f97lbrsokiw\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 344,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/ecdd5ba5-nah1p7j5w8fsn12u.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/ecdd5ba5\\-nah1p7j5w8fsn12u\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 345,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/ed6eee73-ji4d02fnmn4j27a5.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/ed6eee73\\-ji4d02fnmn4j27a5\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 346,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/ed836a35-dsvpt9pika8334yj.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/ed836a35\\-dsvpt9pika8334yj\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 347,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/eda93c10-owa5kvkms7jsn4fn.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/eda93c10\\-owa5kvkms7jsn4fn\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 348,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/ee5ab530-kzkl2ajiknxobp5p.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/ee5ab530\\-kzkl2ajiknxobp5p\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 349,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/f015346a-jeks1m7vuauq6q70.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/f015346a\\-jeks1m7vuauq6q70\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 350,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/f254c486-e4e4t6ee3eghlnbc.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/f254c486\\-e4e4t6ee3eghlnbc\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 351,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/f4222f0c-ewt1xsvd3vb8cf7q.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/f4222f0c\\-ewt1xsvd3vb8cf7q\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 352,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/f43ce1f0-cynln2ayrnjv35lb.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/f43ce1f0\\-cynln2ayrnjv35lb\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 353,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/f4e264a1-n7ypi89ro3hgcgmv.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/f4e264a1\\-n7ypi89ro3hgcgmv\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 354,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/f5472ced-1pqcle7qcaqv6l79.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/f5472ced\\-1pqcle7qcaqv6l79\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 355,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/f5588252-jj7fdom20w3i9pbi.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/f5588252\\-jj7fdom20w3i9pbi\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 356,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/f62a75a9-mde951qp3gye82gz.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/f62a75a9\\-mde951qp3gye82gz\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 357,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/f6a81ab7-f8ugjvhs29ngmlto.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/f6a81ab7\\-f8ugjvhs29ngmlto\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 358,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/f6f4f1b2-gtlbp7j4szobo0y1.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/f6f4f1b2\\-gtlbp7j4szobo0y1\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 359,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/f7e0bf69-k16b7dassy0t23ka.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/f7e0bf69\\-k16b7dassy0t23ka\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 360,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/f8d34c7f-gtanw863rhmb9w3n.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/f8d34c7f\\-gtanw863rhmb9w3n\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 361,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/f92d18c6-mqoku7prfmh5zrjc.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/f92d18c6\\-mqoku7prfmh5zrjc\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 362,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/f9f4764f-j9uqtf79aupa4n8y.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/f9f4764f\\-j9uqtf79aupa4n8y\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 363,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/favicon-l4nq08hd.svg"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/favicon\\-l4nq08hd\\.svg(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 364,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/fb7431ec-dn50lvrcg4mg5fvy.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/fb7431ec\\-dn50lvrcg4mg5fvy\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 365,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/fd49efc5-ftydrxgh4y8cl3v6.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/fd49efc5\\-ftydrxgh4y8cl3v6\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 366,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/feff6cd4-h0ziu001e0pw1st7.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/feff6cd4\\-h0ziu001e0pw1st7\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 367,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/ff93d687-o2udeu3bt7yl7cne.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/ff93d687\\-o2udeu3bt7yl7cne\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 368,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/manifest-481654a2.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/manifest\\-481654a2\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 369,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/product-variants-ga945uk2.css"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/product\\-variants\\-ga945uk2\\.css(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 370,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/root-c6w0vzk3.css"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/root\\-c6w0vzk3\\.css(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 371,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/silk-hq-jrmbfqt7.css"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/silk\\-hq\\-jrmbfqt7\\.css(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 372,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/table-components-ca43bz4f.css"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/table\\-components\\-ca43bz4f\\.css(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 373,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn/assets/writing-block-editor-o0v3uy9j.css"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn/assets/writing\\-block\\-editor\\-o0v3uy9j\\.css(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 374,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/chatgpt.com/cdn-cgi/challenge-platform/scripts/jsd/main.js"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://chatgpt\\.com/cdn\\-cgi/challenge\\-platform/scripts/jsd/main\\.js(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 375,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/ab.chatgpt.com/v1/rgstr-03e5db70a6d618.html"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://ab\\.chatgpt\\.com/v1/rgstr\\-03e5db70a6d618\\.html(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 376,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/ab.chatgpt.com/v1/rgstr-16a35f993a3a.html"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://ab\\.chatgpt\\.com/v1/rgstr\\-16a35f993a3a\\.html(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 377,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/ab.chatgpt.com/v1/rgstr-20ec3245be2078.html"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://ab\\.chatgpt\\.com/v1/rgstr\\-20ec3245be2078\\.html(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 378,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/ab.chatgpt.com/v1/rgstr-4d11ab1d04318.html"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://ab\\.chatgpt\\.com/v1/rgstr\\-4d11ab1d04318\\.html(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 379,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/ab.chatgpt.com/v1/rgstr-4f8a188a1c50c8.html"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://ab\\.chatgpt\\.com/v1/rgstr\\-4f8a188a1c50c8\\.html(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 380,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/ab.chatgpt.com/v1/rgstr-5e51e007bf871.html"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://ab\\.chatgpt\\.com/v1/rgstr\\-5e51e007bf871\\.html(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 381,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/ab.chatgpt.com/v1/rgstr-aab962d014254.html"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://ab\\.chatgpt\\.com/v1/rgstr\\-aab962d014254\\.html(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 382,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/ab.chatgpt.com/v1/rgstr-e020e31bca157.html"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://ab\\.chatgpt\\.com/v1/rgstr\\-e020e31bca157\\.html(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 383,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/ab.chatgpt.com/v1/rgstr-e25adc631a24d8.html"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://ab\\.chatgpt\\.com/v1/rgstr\\-e25adc631a24d8\\.html(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 384,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/ab.chatgpt.com/v1/rgstr-f558c94bfb9f5.html"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://ab\\.chatgpt\\.com/v1/rgstr\\-f558c94bfb9f5\\.html(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 385,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/ab.chatgpt.com/v1/rgstr.html"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://ab\\.chatgpt\\.com/v1/rgstr\\.html(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 386,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/cdn.openai.com/common/fonts/openai-sans/v2/OpenAISans-Semibold.woff2"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://cdn\\.openai\\.com/common/fonts/openai\\-sans/v2/OpenAISans\\-Semibold\\.woff2(?:\\?.*)?$"
+    }
+  },
+  {
+    "id": 387,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": {
+        "extensionPath": "/mirror/cdn.auth0.com/avatars/cb.png"
+      }
+    },
+    "condition": {
+      "regexFilter": "^https://cdn\\.auth0\\.com/avatars/cb\\.png(?:\\?.*)?$"
+    }
+  }
+]

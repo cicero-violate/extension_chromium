@@ -1,0 +1,58 @@
+{
+  "manifest_version": 3,
+  "name": "ChatGPT Private Chat Perf Override (Full CDN Mirror)",
+  "version": "0.4.0",
+  "description": "Mirrors the archived ChatGPT static asset set and keeps the DOM-only private chat perf override.",
+  "permissions": [
+    "declarativeNetRequest"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://ab.chatgpt.com/*",
+    "https://cdn.openai.com/*",
+    "https://cdn.auth0.com/*"
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "full-cdn-mirror",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "inject_page_helper.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "perf_override.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "page_helper.js",
+        "mirror/*"
+      ],
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://ab.chatgpt.com/*",
+        "https://cdn.openai.com/*",
+        "https://cdn.auth0.com/*"
+      ]
+    }
+  ]
+}
