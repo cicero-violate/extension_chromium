@@ -2,6 +2,13 @@
   'use strict';
 
   const HEARTBEAT_STALE_SECONDS = 25;
+  const ROLE_TIMELINE_RANGE_KEY = 'modelFleetControl:roleTimelineRange:v1';
+  const ROLE_TIMELINE_RANGES = new Set([900000, 3600000, 14400000]);
+  let roleTimelineRangeMs = 3600000;
+  try {
+    const storedRange = Number(localStorage.getItem(ROLE_TIMELINE_RANGE_KEY));
+    if (ROLE_TIMELINE_RANGES.has(storedRange)) roleTimelineRangeMs = storedRange;
+  } catch {}
   let snapshot = null;
   let refreshTimer = null;
 
@@ -17,6 +24,7 @@
     tasks: $('tasks'), taskCount: $('taskCount'), workers: $('workers'), workerCount: $('workerCount'),
     messageTarget: $('messageTarget'), messageBody: $('messageBody'), sendMessage: $('sendMessage'), allThreads: $('allThreads'), allThreadsCount: $('allThreadsCount'), allThreadsSort: $('allThreadsSort'), inbox: $('inbox'), inboxCount: $('inboxCount'), inboxSort: $('inboxSort'),
     traffic: $('traffic'), trafficCount: $('trafficCount'), trafficSort: $('trafficSort'), journal: $('journal'), viewTabs: $('viewTabs'), messageViewTabs: $('messageViewTabs'),
+    roleTimeline: $('roleTimeline'), roleTimelineRange: $('roleTimelineRange'), roleTimelineMeta: $('roleTimelineMeta'),
   };
 
   function send(type, payload = {}) {
@@ -92,6 +100,7 @@
         : { queueByWorker: {}, activeAssignments: 0, maxConcurrency: Math.max(1, Math.min(64, Number(policy.maxConcurrency) || 8)) },
       messages: Array.isArray(source.messages) ? source.messages.filter((item) => item && typeof item === 'object') : [],
       journal: Array.isArray(source.journal) ? source.journal.filter((item) => item && typeof item === 'object') : [],
+      roleActivity: Array.isArray(source.roleActivity) ? source.roleActivity.filter((item) => item && typeof item === 'object' && Number(item.at || 0) > 0) : [],
     };
   }
 
@@ -177,6 +186,118 @@
 
   function workers() {
     return snapshot ? Object.values(snapshot.workers || {}) : [];
+  }
+
+  function currentRoleActivityCounts() {
+    const roles = Object.fromEntries(roleCatalog().map((role) => [role.id, {
+      running: 0,
+      idle: 0,
+      blocked: 0,
+      offline: 0,
+      total: 0,
+    }]));
+    for (const worker of workers()) {
+      if (!worker || worker.enabled === false) continue;
+      const role = String(worker.role || 'coordinator');
+      const counts = roles[role] || (roles[role] = { running: 0, idle: 0, blocked: 0, offline: 0, total: 0 });
+      counts.total += 1;
+      if (worker.currentAssignmentId) counts.running += 1;
+      else if (worker.lifecycle === 'stale' || worker.lifecycle === 'offline' || !Number.isInteger(worker.tabId)) counts.offline += 1;
+      else if (worker.status === 'blocked') counts.blocked += 1;
+      else counts.idle += 1;
+    }
+    return roles;
+  }
+
+  function roleActivityCountsEqual(a, b) {
+    return ['running', 'idle', 'blocked', 'offline', 'total']
+      .every((key) => Math.max(0, Number(a?.[key] || 0)) === Math.max(0, Number(b?.[key] || 0)));
+  }
+
+  function formatTimelineTime(ts) {
+    try {
+      return new Date(Number(ts)).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return '—';
+    }
+  }
+
+  function renderRoleTimeline() {
+    if (!snapshot || !els.roleTimeline) return;
+    const nowAt = Math.max(Date.now(), Number(snapshot.serverNow || 0));
+    const range = ROLE_TIMELINE_RANGES.has(roleTimelineRangeMs) ? roleTimelineRangeMs : 3600000;
+    const requestedStartAt = nowAt - range;
+    const stored = (Array.isArray(snapshot.roleActivity) ? snapshot.roleActivity : [])
+      .filter((sample) => Number(sample?.at || 0) > 0 && sample.roles && typeof sample.roles === 'object')
+      .sort((a, b) => Number(a.at) - Number(b.at));
+    const currentRoles = currentRoleActivityCounts();
+    const earliestCapturedAt = stored.length ? Number(stored[0].at || 0) : 0;
+    const startAt = earliestCapturedAt && earliestCapturedAt > requestedStartAt ? earliestCapturedAt : requestedStartAt;
+    const displayedRange = Math.max(1, nowAt - startAt);
+    const last = stored[stored.length - 1];
+    const samples = stored.slice();
+    const currentChanged = !last || roleCatalog().some((role) => !roleActivityCountsEqual(last.roles?.[role.id], currentRoles[role.id]));
+    if (currentChanged) samples.push({ at: nowAt, roles: currentRoles });
+
+    els.roleTimelineRange.value = String(range);
+    const earliest = earliestCapturedAt;
+    els.roleTimelineMeta.textContent = earliest
+      ? formatDurationMs(Math.max(0, nowAt - earliest)) + ' captured · showing ' + formatDurationMs(displayedRange) + ' · ' + stored.length + ' transitions'
+      : 'history starts with this deployment';
+
+    const axisTicks = [0, 0.25, 0.5, 0.75, 1];
+    const axis = '<div class="role-timeline-axis"><div></div><div class="role-timeline-axis-track">'
+      + axisTicks.map((ratio, index) => '<span class="role-timeline-tick" style="left:' + (ratio * 100) + '%">'
+        + (index === axisTicks.length - 1 ? 'now' : escapeHtml(formatTimelineTime(startAt + displayedRange * ratio)))
+        + '</span>').join('')
+      + '</div></div>';
+
+    const rows = roleCatalog().map((role) => {
+      const current = currentRoles[role.id] || { running: 0, idle: 0, blocked: 0, offline: 0, total: 0 };
+      const currentDetail = current.running + '/' + current.total + ' running · ' + current.idle + ' idle'
+        + ((current.blocked || current.offline) ? ' · ' + (current.blocked + current.offline) + ' unavailable' : '');
+
+      let state = null;
+      for (const sample of samples) {
+        if (Number(sample.at) <= startAt && sample.roles?.[role.id]) state = sample.roles[role.id];
+        else if (Number(sample.at) > startAt) break;
+      }
+      let cursor = startAt;
+      const segments = [];
+      for (const sample of samples) {
+        const at = Number(sample.at || 0);
+        if (at <= startAt || at > nowAt) continue;
+        const nextState = sample.roles?.[role.id];
+        if (!nextState || (state && roleActivityCountsEqual(state, nextState))) continue;
+        if (state && at > cursor) segments.push([cursor, at, state]);
+        state = nextState;
+        cursor = Math.max(cursor, at);
+      }
+      if (state && nowAt > cursor) segments.push([cursor, nowAt, state]);
+
+      const segmentHtml = segments.map(([from, to, counts]) => {
+        const left = Math.max(0, Math.min(100, ((from - startAt) / displayedRange) * 100));
+        const width = Math.max(0.08, Math.min(100 - left, ((to - from) / displayedRange) * 100));
+        const total = Math.max(0, Number(counts.total || 0));
+        const running = Math.max(0, Number(counts.running || 0));
+        const unavailable = Math.max(0, Number(counts.blocked || 0) + Number(counts.offline || 0));
+        const runningPct = total ? Math.min(100, (running / total) * 100) : 0;
+        const unavailablePct = total ? Math.min(100, (unavailable / total) * 100) : 0;
+        const title = (role.label || role.id) + ': ' + running + '/' + total + ' running, '
+          + Math.max(0, Number(counts.idle || 0)) + ' idle, ' + unavailable + ' blocked/offline · '
+          + formatTime(from) + '–' + formatTime(to);
+        return '<div class="role-timeline-segment" style="left:' + left + '%;width:' + width + '%" title="' + escapeHtml(title) + '">'
+          + '<span class="role-timeline-run" style="height:' + runningPct + '%"></span>'
+          + '<span class="role-timeline-unavailable" style="width:' + unavailablePct + '%"></span></div>';
+      }).join('');
+
+      return '<div class="role-timeline-row">'
+        + '<div class="role-timeline-label"><strong>' + escapeHtml(role.label || role.id) + '</strong><span class="role-timeline-current">' + escapeHtml(currentDetail) + '</span></div>'
+        + '<div class="role-timeline-track">' + (segmentHtml || '<span class="role-timeline-no-data">collecting history…</span>') + '<span class="role-timeline-now"></span></div>'
+        + '</div>';
+    }).join('');
+
+    els.roleTimeline.innerHTML = axis + rows;
   }
 
   function tasks() {
@@ -542,6 +663,7 @@
 
     renderTopology();
     renderRoleContracts();
+    renderRoleTimeline();
     renderWorkers();
     renderTasks();
     renderMessages();
@@ -570,6 +692,7 @@
       }
       snapshot.serverNow = Number(message.serverNow) || Date.now();
       updateHeartbeatDisplays();
+      renderRoleTimeline();
     }
   });
 
@@ -605,6 +728,12 @@
   });
 
   els.refresh.addEventListener('click', () => refresh().then(() => setStatus('Refreshed')).catch((error) => setStatus(String(error), true)));
+  els.roleTimelineRange.addEventListener('change', () => {
+    const next = Number(els.roleTimelineRange.value);
+    roleTimelineRangeMs = ROLE_TIMELINE_RANGES.has(next) ? next : 3600000;
+    try { localStorage.setItem(ROLE_TIMELINE_RANGE_KEY, String(roleTimelineRangeMs)); } catch {}
+    renderRoleTimeline();
+  });
   els.saveGoal.addEventListener('click', () => send('fleet:set-goal', { goal: els.goalInput.value }).then((response) => { snapshot = normalizeSnapshot(response.snapshot); render(); setStatus('Goal saved'); }).catch((error) => setStatus(String(error), true)));
 
   els.concurrency.addEventListener('input', () => { els.concurrencyValue.textContent = els.concurrency.value; });

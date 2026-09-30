@@ -6,6 +6,8 @@ const SUPPORTED_URL = /^https:\/\/(?:chatgpt\.com|chat\.openai\.com)\//;
 const APPROVAL_CONTENT_FILES = Object.freeze(['stream-retry.js', 'content.js']);
 const MAX_JOURNAL = 250;
 const MAX_MESSAGES = 250;
+const MAX_ROLE_ACTIVITY_SAMPLES = 8000;
+const ROLE_ACTIVITY_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MAX_RESULT_CHARS = 16000;
 const MAX_MESSAGE_BATCH_SIZE = 12;
 const MAX_MESSAGE_BATCH_CHARS = 12000;
@@ -218,6 +220,7 @@ function freshFleetState() {
     tasks: {},
     messages: [],
     journal: [],
+    roleActivity: [],
     nextTask: 1,
     nextMessage: 1,
     nextWorkerSlot: 1,
@@ -296,6 +299,14 @@ function normalizeFleetState(value) {
       message.toWorkerId = rewriteWorkerRef(message.toWorkerId);
     }
   }
+  const roleActivityCutoff = now() - ROLE_ACTIVITY_RETENTION_MS;
+  const roleActivity = Array.isArray(state.roleActivity)
+    ? state.roleActivity
+      .filter((sample) => sample && typeof sample === 'object'
+        && Number(sample.at || 0) >= roleActivityCutoff
+        && sample.roles && typeof sample.roles === 'object' && !Array.isArray(sample.roles))
+      .slice(-MAX_ROLE_ACTIVITY_SAMPLES)
+    : [];
   return {
     ...freshFleetState(),
     ...state,
@@ -306,12 +317,50 @@ function normalizeFleetState(value) {
     tasks,
     messages,
     journal: Array.isArray(state.journal) ? state.journal.slice(-MAX_JOURNAL) : [],
+    roleActivity,
   };
 }
 
 async function loadFleetState() {
   const stored = await chrome.storage.local.get(FLEET_STATE_KEY);
   return normalizeFleetState(stored[FLEET_STATE_KEY]);
+}
+
+function roleActivityCounts(state) {
+  const roles = Object.fromEntries(ROLE_CATALOG.map((role) => [role.id, {
+    running: 0,
+    idle: 0,
+    blocked: 0,
+    offline: 0,
+    total: 0,
+  }]));
+  for (const worker of Object.values(state.workers || {})) {
+    if (!worker || worker.enabled === false) continue;
+    const role = canonicalRole(worker.role);
+    const counts = roles[role] || (roles[role] = { running: 0, idle: 0, blocked: 0, offline: 0, total: 0 });
+    counts.total += 1;
+    if (worker.currentAssignmentId) counts.running += 1;
+    else if (worker.lifecycle === 'stale' || worker.lifecycle === 'offline' || !Number.isInteger(worker.tabId)) counts.offline += 1;
+    else if (worker.status === 'blocked') counts.blocked += 1;
+    else counts.idle += 1;
+  }
+  return roles;
+}
+
+function recordRoleActivity(state, observedAt = now()) {
+  if (!Array.isArray(state.roleActivity)) state.roleActivity = [];
+  const roles = roleActivityCounts(state);
+  const previous = state.roleActivity[state.roleActivity.length - 1];
+  if (previous && JSON.stringify(previous.roles) === JSON.stringify(roles)) return;
+  if (previous && Number(previous.at || 0) === observedAt) {
+    previous.roles = roles;
+  } else {
+    state.roleActivity.push({ at: observedAt, roles });
+  }
+  const cutoff = observedAt - ROLE_ACTIVITY_RETENTION_MS;
+  state.roleActivity = state.roleActivity
+    .filter((sample) => Number(sample?.at || 0) >= cutoff)
+    .slice(-MAX_ROLE_ACTIVITY_SAMPLES);
 }
 
 function appendJournal(state, type, text, detail = {}) {
@@ -409,6 +458,7 @@ function mutateFleet(mutator) {
   const operation = stateQueue.then(async () => {
     const state = await loadFleetState();
     const result = await mutator(state);
+    recordRoleActivity(state);
     state.generation = Math.max(1, Number(state.generation || 0) + 1);
     state.updatedAt = now();
     await chrome.storage.local.set({ [FLEET_STATE_KEY]: state });

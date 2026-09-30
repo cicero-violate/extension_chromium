@@ -39,6 +39,8 @@
     .invariant{display:grid;grid-template-columns:18px 1fr auto;gap:7px;padding:8px 0;border-bottom:1px solid #1a2230;align-items:center}.invariant:last-child{border-bottom:0}.ok{color:var(--green)}.warn{color:var(--amber)}.bad{color:var(--red)}
     .journal{max-height:560px;overflow:auto}.event{display:grid;grid-template-columns:72px 1fr;gap:7px;padding:5px 0;border-bottom:1px solid #151d29;font-size:11px}.event-time{color:#657386;font-variant-numeric:tabular-nums}.event-text{color:#c5cfdb}.operator{border-color:#3e375d;background:#12101c}.toolbar{display:flex;gap:6px;flex-wrap:wrap}.form-grid{display:grid;grid-template-columns:1fr 150px 90px;gap:7px}.statusline{min-height:18px;color:var(--green);font-size:11px;margin-top:6px}.head-controls{display:flex;align-items:center;gap:7px}.sort-select{padding:4px 7px;font-size:11px;border-radius:6px;background:#0d141d}
     .empty{color:var(--muted);padding:8px 0}.exception{border-color:#493c22;background:#17140d}.exception strong{color:var(--amber)}
+    .role-timeline-panel{grid-column:1/-1}.role-timeline-legend{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:10px;color:var(--muted);font-size:10px}.timeline-key{display:inline-flex;align-items:center;gap:5px}.timeline-swatch{width:16px;height:7px;border-radius:3px;background:#1a2432;border:1px solid #2a384c}.timeline-swatch.running-key{background:rgba(116,168,255,.72);border-color:rgba(116,168,255,.55)}.timeline-swatch.unavailable-key{height:3px;background:rgba(242,119,122,.8);border-color:rgba(242,119,122,.55)}
+    .role-timeline-scroll{overflow-x:auto}.role-timeline{min-width:760px}.role-timeline-axis,.role-timeline-row{display:grid;grid-template-columns:150px minmax(580px,1fr);gap:10px;align-items:center}.role-timeline-axis{margin-bottom:4px}.role-timeline-axis-track{height:24px;position:relative;border-bottom:1px solid var(--border)}.role-timeline-tick{position:absolute;bottom:3px;transform:translateX(-50%);color:#657386;font-size:10px;font-variant-numeric:tabular-nums;white-space:nowrap}.role-timeline-tick:first-child{transform:none}.role-timeline-tick:last-child{transform:translateX(-100%)}.role-timeline-row{min-height:38px}.role-timeline-label{min-width:0}.role-timeline-label strong{display:block;font-size:11px}.role-timeline-current{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}.role-timeline-track{height:27px;position:relative;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:repeating-linear-gradient(90deg,#0b1119 0,#0b1119 calc(25% - 1px),#1a2330 calc(25% - 1px),#1a2330 25%)}.role-timeline-segment{position:absolute;top:3px;bottom:3px;min-width:1px;border-radius:4px;background:#182231;overflow:hidden;border:1px solid rgba(255,255,255,.03)}.role-timeline-run{position:absolute;left:0;right:0;bottom:0;background:rgba(116,168,255,.68)}.role-timeline-unavailable{position:absolute;left:0;bottom:0;height:3px;background:rgba(242,119,122,.85)}.role-timeline-now{position:absolute;right:0;top:0;bottom:0;width:1px;background:rgba(93,211,158,.9);z-index:3}.role-timeline-no-data{font-size:10px;color:#657386;padding-left:7px;line-height:25px}
     @media(max-width:1080px){.overview-grid,.tasks-grid,.messages-grid,.diagnostics-grid{grid-template-columns:1fr}}
     @media(max-width:760px){.worker-grid{grid-template-columns:1fr}.goalbar{grid-template-columns:1fr 1fr}.goal-wrap{grid-column:1/-1}.health{display:none}.form-grid{grid-template-columns:1fr}.view-tabs{overflow-x:auto}.view-tab{white-space:nowrap}}
   </style>
@@ -72,6 +74,21 @@
   <main class="workspace">
     <section class="view-panel" data-view-panel="overview">
       <div class="view-grid overview-grid">
+        <section class="panel role-timeline-panel">
+          <div class="head">
+            <div><div class="title">Role utilization timeline</div><div class="small">fleet resource occupancy over time</div></div>
+            <div class="head-controls"><span class="meta" id="roleTimelineMeta">history collecting</span><select class="sort-select" id="roleTimelineRange" aria-label="Role timeline range"><option value="900000">15m</option><option value="3600000" selected>1h</option><option value="14400000">4h</option></select></div>
+          </div>
+          <div class="body">
+            <div class="role-timeline-legend">
+              <span class="timeline-key"><span class="timeline-swatch running-key"></span>running share</span>
+              <span class="timeline-key"><span class="timeline-swatch"></span>idle share</span>
+              <span class="timeline-key"><span class="timeline-swatch unavailable-key"></span>blocked / offline share</span>
+              <span>Each lane is a role; hover a segment for exact counts.</span>
+            </div>
+            <div class="role-timeline-scroll"><div class="role-timeline" id="roleTimeline"></div></div>
+          </div>
+        </section>
         <div class="column">
           <section class="panel"><div class="head"><div class="title">Fleet authority</div><div class="meta" id="generation">gen —</div></div><div class="body">
             <div class="toolbar"><button class="button" id="refresh">Refresh</button></div>
