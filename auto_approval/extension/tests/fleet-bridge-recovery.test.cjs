@@ -44,8 +44,8 @@ test('recovery reconstructs current task or semantic-message assignment from dur
   assert.match(body, /worker\.currentTaskId/);
   assert.match(body, /task\.assignmentId !== worker\.currentAssignmentId/);
   assert.match(body, /buildTaskPrompt/);
-  assert.match(body, /worker\.currentMessageId/);
-  assert.match(body, /message\.assignmentId !== worker\.currentAssignmentId/);
+  assert.match(body, /assignmentMessages\(state, worker\)/);
+  assert.match(body, /messageIds: messages\.map/);
   assert.match(body, /buildMessagePrompt/);
 });
 

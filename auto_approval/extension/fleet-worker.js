@@ -90,7 +90,7 @@
     return expected.length >= 160 && actual.includes(head) && actual.includes(tail);
   }
 
-  function writeCompletionHandoff(completed, text) {
+  function writeCompletionHandoff(completed, text, responseTerminalAt = 0) {
     const node = completionHandoffNode(true);
     if (!node) return null;
     const payload = {
@@ -100,6 +100,7 @@
       title: document.title,
       url: location.href,
       createdAt: Date.now(),
+      responseTerminalAt: Math.max(0, Number(responseTerminalAt || 0)),
     };
     node.setAttribute('data-payload', JSON.stringify(payload));
     pendingCompletion = payload;
@@ -650,6 +651,7 @@
       title: payload.title || document.title,
       url: payload.url || location.href,
       recoveredAfterContextReload: payload.createdAt > 0,
+      responseTerminalAt: Math.max(0, Number(payload.responseTerminalAt || 0)),
     });
     if (response?.ok === false) throw new Error(response.error || 'completion report rejected');
     return response;
@@ -690,6 +692,7 @@
     active = null;
     clearAssignmentRecoveryHint(completed.assignment.id);
     stopMonitor();
+    const responseTerminalAt = Date.now();
     const payload = {
       assignmentId: completed.assignment.id,
       kind: completed.assignment.kind,
@@ -697,13 +700,14 @@
       title: document.title,
       url: location.href,
       createdAt: 0,
+      responseTerminalAt,
     };
     try {
       await reportCompletionPayload(payload);
       hideTransportResponse(payload.text);
       signalIdleReady(payload.assignmentId);
     } catch (error) {
-      writeCompletionHandoff(completed, text);
+      writeCompletionHandoff(completed, text, responseTerminalAt);
       if (extensionContextInvalidated(error)) {
         retireInvalidatedBridge();
         return;

@@ -12,7 +12,7 @@
     generation: $('generation'), refresh: $('refresh'), status: $('status'), roleContracts: $('roleContracts'),
     roleTargets: $('roleTargets'), topologyActual: $('topologyActual'), topologyTotal: $('topologyTotal'), reconcileFleet: $('reconcileFleet'),
     concurrency: $('concurrency'), concurrencyValue: $('concurrencyValue'), turnLimit: $('turnLimit'), turnLimitValue: $('turnLimitValue'), authorityValue: $('authorityValue'),
-    invariants: $('invariants'), exceptions: $('exceptions'), exceptionCount: $('exceptionCount'),
+    invariants: $('invariants'), queuePressure: $('queuePressure'), queuePressureCount: $('queuePressureCount'), exceptions: $('exceptions'), exceptionCount: $('exceptionCount'),
     taskTitle: $('taskTitle'), taskRole: $('taskRole'), taskPriority: $('taskPriority'), taskPrompt: $('taskPrompt'), taskDeps: $('taskDeps'), createTask: $('createTask'),
     tasks: $('tasks'), taskCount: $('taskCount'), workers: $('workers'), workerCount: $('workerCount'),
     messageTarget: $('messageTarget'), messageBody: $('messageBody'), sendMessage: $('sendMessage'), allThreads: $('allThreads'), allThreadsCount: $('allThreadsCount'), allThreadsSort: $('allThreadsSort'), inbox: $('inbox'), inboxCount: $('inboxCount'), inboxSort: $('inboxSort'),
@@ -49,6 +49,17 @@
     }
   }
 
+  function formatDurationMs(value) {
+    const ms = Math.max(0, Number(value || 0));
+    if (ms < 1000) return `${Math.round(ms)}ms`;
+    const seconds = ms / 1000;
+    if (seconds < 60) return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
+    const minutes = seconds / 60;
+    if (minutes < 60) return `${minutes < 10 ? minutes.toFixed(1) : Math.round(minutes)}m`;
+    const hours = minutes / 60;
+    return `${hours < 10 ? hours.toFixed(1) : Math.round(hours)}h`;
+  }
+
   function normalizeSnapshot(value) {
     const source = value && typeof value === 'object' ? value : {};
     const policy = source.policy && typeof source.policy === 'object' ? source.policy : {};
@@ -76,6 +87,9 @@
       topology: { desiredRoleCounts },
       workers,
       tasks,
+      diagnostics: source.diagnostics && typeof source.diagnostics === 'object'
+        ? source.diagnostics
+        : { queueByWorker: {}, activeAssignments: 0, maxConcurrency: Math.max(1, Math.min(64, Number(policy.maxConcurrency) || 8)) },
       messages: Array.isArray(source.messages) ? source.messages.filter((item) => item && typeof item === 'object') : [],
       journal: Array.isArray(source.journal) ? source.journal.filter((item) => item && typeof item === 'object') : [],
     };
@@ -293,6 +307,14 @@
       const status = warmIdle ? 'warm' : rotating ? 'rotating' : activating ? 'waking' : stale ? 'offline' : safeStatus(worker.status, 'idle');
       const statusClass = status === 'running' || status === 'waking' ? 'running' : status === 'blocked' || status === 'offline' ? 'blocked' : 'pending';
       const assignment = worker.currentTaskId || worker.currentMessageId || 'idle';
+      const queue = snapshot?.diagnostics?.queueByWorker?.[worker.id] || {};
+      const queuedCount = Math.max(0, Number(queue.queuedCount || 0));
+      const oldestQueueAgeMs = Number(queue.oldestQueuedAt || 0)
+        ? Math.max(0, Date.now() - Number(queue.oldestQueuedAt))
+        : Math.max(0, Number(queue.oldestQueueAgeMs || 0));
+      const queueDetail = queuedCount
+        ? `${queuedCount} queued${worker.currentAssignmentId ? ` behind ${worker.currentAssignmentId}` : ''} · oldest ${formatDurationMs(oldestQueueAgeMs)}`
+        : 'empty';
       const urlInfo = workerUrlInfo(worker);
       const cancelDispatch = worker.currentAssignmentId
         ? `<button class="mini" data-action="cancel-dispatch" data-worker="${escapeHtml(worker.id)}">Cancel / clear</button>`
@@ -300,6 +322,7 @@
       return `<div class="worker" data-worker="${escapeHtml(worker.id)}">
         <div class="topline"><div><div class="name tab-name" title="${escapeHtml(workerTabTitle(worker))}">${escapeHtml(workerTabTitle(worker))}</div><div class="role">${escapeHtml(worker.id)} · ${escapeHtml(worker.role)}</div></div><span class="pill ${statusClass}">${escapeHtml(status.toUpperCase())}</span></div>
         <div class="small" style="margin-top:6px">${escapeHtml(assignment)} · ${escapeHtml(lifecycle)} · ${worker.lifecycle === 'stale' ? 'stale / unbound' : `tab ${worker.tabId ?? '—'} · window ${worker.windowId ?? '—'} · heartbeat ${age === null ? 'never' : `${age}s ago`}`}</div>
+        <div class="small">Queue · ${escapeHtml(queueDetail)}</div>
         <div class="small">Chat turns · ${Math.max(0, Number(worker.chatTurnCount || 0))} / ${snapshot.policy.maxTurnsPerChat}${worker.chatRotationPending ? ' · rotation pending' : ''}</div>
         <div class="small" title="${escapeHtml(urlInfo.full)}">URL · ${escapeHtml(urlInfo.short)}</div>
         <div class="caps">${escapeHtml((worker.capabilities || []).join(' · '))}</div>
@@ -338,6 +361,7 @@
       const heartbeatLine = root.querySelector(".small");
       if (heartbeatLine) heartbeatLine.textContent = `${assignment} · ${lifecycle} · heartbeat ${age === null ? "never" : `${age}s ago`}`;
     }
+    renderQueuePressure();
     renderInvariantsAndExceptions();
   }
 
@@ -393,8 +417,47 @@
     if ([...els.messageTarget.options].some((option) => option.value === current)) els.messageTarget.value = current;
   }
 
+  function renderQueuePressure() {
+    if (!els.queuePressure || !els.queuePressureCount) return;
+    const queueByWorker = snapshot?.diagnostics?.queueByWorker || {};
+    const rows = workers().map((worker) => {
+      const metrics = queueByWorker[worker.id] || {};
+      return {
+        worker,
+        queuedCount: Math.max(0, Number(metrics.queuedCount || 0)),
+        oldestQueueAgeMs: Number(metrics.oldestQueuedAt || 0)
+          ? Math.max(0, Date.now() - Number(metrics.oldestQueuedAt))
+          : Math.max(0, Number(metrics.oldestQueueAgeMs || 0)),
+        currentAssignmentId: metrics.currentAssignmentId || worker.currentAssignmentId || null,
+        currentMessageCount: Math.max(0, Number(metrics.currentMessageCount || 0)),
+        controlInboxCount: Math.max(0, Number(metrics.controlInboxCount || 0)),
+        lastLagMs: Math.max(0, Number(metrics.lastCompletionReleaseLagMs || 0)),
+        avgLagMs: Math.max(0, Number(metrics.averageCompletionReleaseLagMs || 0)),
+        maxLagMs: Math.max(0, Number(metrics.maxCompletionReleaseLagMs || 0)),
+        lagCount: Math.max(0, Number(metrics.completionReleaseLagCount || 0)),
+      };
+    }).filter((row) => row.queuedCount > 0 || row.controlInboxCount > 0 || row.lagCount > 0)
+      .sort((a, b) => b.queuedCount - a.queuedCount
+        || b.oldestQueueAgeMs - a.oldestQueueAgeMs
+        || a.worker.id.localeCompare(b.worker.id, undefined, { numeric: true }));
+    const totalQueued = rows.reduce((sum, row) => sum + row.queuedCount, 0);
+    els.queuePressureCount.textContent = `${totalQueued} queued`;
+    els.queuePressure.innerHTML = rows.length ? rows.map((row) => {
+      const queueText = row.queuedCount
+        ? `${row.queuedCount} queued${row.currentAssignmentId ? ` behind ${row.currentAssignmentId}` : ''}`
+        : 'no semantic queue';
+      const lagText = row.lagCount
+        ? `terminal→release last ${formatDurationMs(row.lastLagMs)} · avg ${formatDurationMs(row.avgLagMs)} · max ${formatDurationMs(row.maxLagMs)} · n=${row.lagCount}`
+        : 'terminal→release awaiting sample';
+      return `<div class="invariant"><span class="${row.queuedCount ? 'bad' : 'ok'}">${row.queuedCount ? '!' : '✓'}</span><div>${escapeHtml(row.worker.id)} · ${escapeHtml(queueText)}<div class="small">oldest ${row.queuedCount ? escapeHtml(formatDurationMs(row.oldestQueueAgeMs)) : '—'} · active batch ${row.currentMessageCount} · control ${row.controlInboxCount}</div><div class="small">${escapeHtml(lagText)}</div></div><span class="${row.queuedCount ? 'bad' : 'ok'}">${row.queuedCount ? 'QUEUE' : 'OK'}</span></div>`;
+    }).join('') : '<div class="empty">No queue pressure or completion-lag samples yet.</div>';
+  }
+
   function renderJournal() {
-    const events = (snapshot?.journal || []).slice(-60).reverse();
+    const events = (snapshot?.journal || [])
+      .filter((event) => event?.type !== 'schedule.deferred')
+      .slice(-60)
+      .reverse();
     els.journal.innerHTML = events.length ? events.map((event) => {
       const error = typeof event.detail?.error === 'string' && event.detail.error.trim()
         ? '<div class="small" style="margin-top:4px">error: ' + escapeHtml(compact(event.detail.error, 500)) + '</div>'
@@ -482,6 +545,7 @@
     renderWorkers();
     renderTasks();
     renderMessages();
+    renderQueuePressure();
     renderJournal();
     renderInvariantsAndExceptions();
   }

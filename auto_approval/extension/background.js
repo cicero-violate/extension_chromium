@@ -7,6 +7,9 @@ const APPROVAL_CONTENT_FILES = Object.freeze(['stream-retry.js', 'content.js']);
 const MAX_JOURNAL = 250;
 const MAX_MESSAGES = 250;
 const MAX_RESULT_CHARS = 16000;
+const MAX_MESSAGE_BATCH_SIZE = 12;
+const MAX_MESSAGE_BATCH_CHARS = 12000;
+const MAX_CONTROL_NOTICES = 32;
 const WORKER_BUSY_FRESH_MS = 30000;
 const HEARTBEAT_FLUSH_MS = 10000;
 const WORKER_WAKE_TIMEOUT_MS = 20000;
@@ -259,6 +262,22 @@ function normalizeFleetState(value) {
     worker.chatRotationPending = worker.chatRotationPending === true
       || worker.chatTurnCount >= boundedMaxTurnsPerChat(policy.maxTurnsPerChat);
     worker.lastCountedAssignmentId = String(worker.lastCountedAssignmentId || '');
+    worker.currentMessageIds = Array.from(new Set([
+      ...(Array.isArray(worker.currentMessageIds) ? worker.currentMessageIds : []),
+      ...(worker.currentMessageId ? [worker.currentMessageId] : []),
+    ].map(String).filter(Boolean)));
+    worker.currentMessageId = worker.currentMessageIds[0] || null;
+    worker.currentAssignmentKind = String(worker.currentAssignmentKind || (worker.currentTaskId ? 'task' : (worker.currentMessageId ? 'message' : '')));
+    worker.controlInbox = Array.isArray(worker.controlInbox) ? worker.controlInbox.slice(-MAX_CONTROL_NOTICES) : [];
+    worker.currentControlNoticeIds = Array.isArray(worker.currentControlNoticeIds)
+      ? Array.from(new Set(worker.currentControlNoticeIds.map(String).filter(Boolean)))
+      : [];
+    worker.lastResponseTerminalAt = Number(worker.lastResponseTerminalAt || 0);
+    worker.lastAssignmentReleasedAt = Number(worker.lastAssignmentReleasedAt || 0);
+    worker.lastCompletionReleaseLagMs = Math.max(0, Number(worker.lastCompletionReleaseLagMs || 0));
+    worker.completionReleaseLagCount = Math.max(0, Number(worker.completionReleaseLagCount || 0));
+    worker.completionReleaseLagTotalMs = Math.max(0, Number(worker.completionReleaseLagTotalMs || 0));
+    worker.completionReleaseLagMaxMs = Math.max(0, Number(worker.completionReleaseLagMaxMs || 0));
     if (['sleeping', 'parking'].includes(worker.lifecycle)) worker.lifecycle = 'idle';
     delete worker.sleepTabId;
     delete worker.sleepingSince;
@@ -326,10 +345,37 @@ function publicSnapshot(state) {
         : (['blocked', 'stale', 'offline'].includes(worker.status) ? worker.status : (busy ? "waiting" : "idle")),
     };
   }
+  const observedAt = now();
+  const queueByWorker = {};
+  for (const [workerId, worker] of Object.entries(workers)) {
+    const queued = state.messages.filter((message) => message.status === 'queued' && message.toWorkerId === workerId);
+    const oldestQueuedAt = queued.reduce((oldest, message) => {
+      const createdAt = Number(message.createdAt || 0);
+      return createdAt > 0 && (!oldest || createdAt < oldest) ? createdAt : oldest;
+    }, 0);
+    const lagCount = Math.max(0, Number(worker.completionReleaseLagCount || 0));
+    queueByWorker[workerId] = {
+      queuedCount: queued.length,
+      oldestQueuedAt,
+      oldestQueueAgeMs: oldestQueuedAt ? Math.max(0, observedAt - oldestQueuedAt) : 0,
+      currentAssignmentId: worker.currentAssignmentId || null,
+      currentMessageCount: Array.isArray(worker.currentMessageIds) ? worker.currentMessageIds.length : (worker.currentMessageId ? 1 : 0),
+      controlInboxCount: Array.isArray(worker.controlInbox) ? worker.controlInbox.length : 0,
+      lastCompletionReleaseLagMs: Math.max(0, Number(worker.lastCompletionReleaseLagMs || 0)),
+      averageCompletionReleaseLagMs: lagCount > 0 ? Math.round(Number(worker.completionReleaseLagTotalMs || 0) / lagCount) : 0,
+      maxCompletionReleaseLagMs: Math.max(0, Number(worker.completionReleaseLagMaxMs || 0)),
+      completionReleaseLagCount: lagCount,
+    };
+  }
   return {
     ...state,
     roleCatalog: ROLE_CATALOG.map((role) => ({ ...role })),
     workers,
+    diagnostics: {
+      queueByWorker,
+      activeAssignments: Object.values(workers).filter((worker) => worker.currentAssignmentId).length,
+      maxConcurrency: Math.max(1, Math.min(64, Number(state.policy.maxConcurrency || 8))),
+    },
     tasks: Object.fromEntries(Object.entries(state.tasks).map(([taskId, task]) => [
       taskId,
       {
@@ -577,6 +623,61 @@ async function setFleetRecoveryHint(tabId, assignmentId = null) {
   });
 }
 
+function assignmentMessageIds(worker) {
+  const ids = Array.isArray(worker?.currentMessageIds) && worker.currentMessageIds.length
+    ? worker.currentMessageIds
+    : (worker?.currentMessageId ? [worker.currentMessageId] : []);
+  return Array.from(new Set(ids.map(String).filter(Boolean)));
+}
+
+function assignmentMessages(state, worker) {
+  const ids = new Set(assignmentMessageIds(worker));
+  return state.messages.filter((message) => ids.has(message.id) && message.assignmentId === worker.currentAssignmentId)
+    .sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+}
+
+function assignmentControlNoticeIds(worker) {
+  return Array.from(new Set((Array.isArray(worker?.currentControlNoticeIds) ? worker.currentControlNoticeIds : [])
+    .map(String)
+    .filter(Boolean)));
+}
+
+function clearWorkerAssignmentState(worker) {
+  if (!worker) return;
+  worker.currentAssignmentId = null;
+  worker.currentAssignmentKind = '';
+  worker.currentAssignmentStartedAt = 0;
+  worker.currentTaskId = null;
+  worker.currentMessageId = null;
+  worker.currentMessageIds = [];
+  worker.currentControlNoticeIds = [];
+}
+
+function requeueAssignmentMessages(state, worker, assignmentId, reason = '') {
+  const messageIds = assignmentMessageIds(worker);
+  const requeued = [];
+  for (const messageId of messageIds) {
+    const message = state.messages.find((item) => item.id === messageId);
+    if (!message || message.assignmentId !== assignmentId) continue;
+    message.status = 'queued';
+    message.assignmentId = null;
+    if (reason) message.lastDeferredReason = reason;
+    requeued.push(message.id);
+  }
+  return requeued;
+}
+
+function consumeAssignmentControlNotices(worker) {
+  const consumed = new Set(assignmentControlNoticeIds(worker));
+  if (!consumed.size) return [];
+  const removed = (Array.isArray(worker.controlInbox) ? worker.controlInbox : [])
+    .filter((notice) => consumed.has(notice.id))
+    .map((notice) => notice.id);
+  worker.controlInbox = (Array.isArray(worker.controlInbox) ? worker.controlInbox : [])
+    .filter((notice) => !consumed.has(notice.id));
+  return removed;
+}
+
 function assignmentForWorker(state, worker) {
   if (!worker?.currentAssignmentId) return null;
   if (worker.currentTaskId) {
@@ -586,19 +687,33 @@ function assignmentForWorker(state, worker) {
       id: worker.currentAssignmentId,
       kind: 'task',
       taskId: task.id,
+      controlNoticeIds: Array.isArray(worker.currentControlNoticeIds) ? worker.currentControlNoticeIds.slice() : [],
       prompt: buildTaskPrompt(state, task, worker),
       startedAt: Number(task.startedAt || 0),
     };
   }
-  if (worker.currentMessageId) {
-    const message = state.messages.find((item) => item.id === worker.currentMessageId);
-    if (!message || message.assignmentId !== worker.currentAssignmentId) return null;
+  const messages = assignmentMessages(state, worker);
+  if (messages.length) {
     return {
       id: worker.currentAssignmentId,
       kind: 'message',
-      messageId: message.id,
-      prompt: buildMessagePrompt(state, message, worker),
-      startedAt: Number(message.deliveredAt || 0),
+      messageId: messages[0].id,
+      messageIds: messages.map((message) => message.id),
+      controlNoticeIds: Array.isArray(worker.currentControlNoticeIds) ? worker.currentControlNoticeIds.slice() : [],
+      prompt: buildMessagePrompt(state, messages, worker),
+      startedAt: messages.map((message) => Number(message.deliveredAt || 0)).filter(Boolean).reduce(
+        (oldest, value) => !oldest || value < oldest ? value : oldest,
+        Number(worker.currentAssignmentStartedAt || 0),
+      ),
+    };
+  }
+  if (worker.currentAssignmentKind === 'control' && Array.isArray(worker.currentControlNoticeIds) && worker.currentControlNoticeIds.length) {
+    return {
+      id: worker.currentAssignmentId,
+      kind: 'control',
+      controlNoticeIds: worker.currentControlNoticeIds.slice(),
+      prompt: buildControlPrompt(state, worker),
+      startedAt: Number(worker.currentAssignmentStartedAt || 0),
     };
   }
   return null;
@@ -756,18 +871,13 @@ async function deferReservedDispatchForActivePage(dispatch) {
         task.attempts = Math.max(0, Number(task.attempts || 0) - 1);
         task.statusNote = 'deferred: ChatGPT turn is still active in the worker tab';
       }
-    } else {
-      const semantic = state.messages.find((item) => item.id === dispatch.assignment.messageId);
-      if (semantic?.assignmentId === dispatch.assignment.id) {
-        semantic.status = 'queued';
-        semantic.assignmentId = null;
-        semantic.lastDeferredReason = 'ChatGPT turn is still active in the worker tab';
-      }
+    } else if (dispatch.assignment.kind === 'message') {
+      requeueAssignmentMessages(state, worker, dispatch.assignment.id, 'ChatGPT turn is still active in the worker tab');
     }
 
-    worker.currentAssignmentId = null;
-    worker.currentTaskId = null;
-    worker.currentMessageId = null;
+    // Control feedback stays durable in worker.controlInbox until a turn
+    // actually completes. A page-busy preflight never consumes it.
+    clearWorkerAssignmentState(worker);
     worker.status = 'waiting';
     worker.lifecycle = 'waiting';
     worker.busy = true;
@@ -782,7 +892,6 @@ async function deferReservedDispatchForActivePage(dispatch) {
 
   setTimeout(() => schedule().catch(() => {}), FLEET_PAGE_BUSY_RECHECK_MS);
 }
-
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -1118,6 +1227,7 @@ function reconcileBridgeRuntimeState(state, workerId, bridgeState = {}) {
   if (!worker) return;
   const liveAssignmentId = bridgeState.activeAssignmentId || null;
   if (worker.currentAssignmentId && worker.currentAssignmentId !== liveAssignmentId) {
+    const staleAssignmentId = worker.currentAssignmentId;
     if (worker.currentTaskId) {
       const task = state.tasks[worker.currentTaskId];
       if (task?.status === 'running') {
@@ -1128,21 +1238,16 @@ function reconcileBridgeRuntimeState(state, workerId, bridgeState = {}) {
         appendJournal(state, 'task.requeued', `${task.id} requeued after stale bridge ownership for ${workerId}`);
       }
     }
-    if (worker.currentMessageId) {
-      const message = state.messages.find((m) => m.id === worker.currentMessageId);
-      if (message?.status === 'running') {
-        message.status = 'queued';
-        message.assignmentId = null;
-        appendJournal(state, 'message.requeued', `${message.id} requeued after stale bridge ownership for ${workerId}`);
-      }
+    const requeued = requeueAssignmentMessages(state, worker, staleAssignmentId, `stale bridge ownership for ${workerId}`);
+    for (const messageId of requeued) {
+      appendJournal(state, 'message.requeued', `${messageId} requeued after stale bridge ownership for ${workerId}`);
     }
     appendJournal(state, 'worker.reconciled', `${workerId} stale assignment cleared`, {
-      persistedAssignmentId: worker.currentAssignmentId,
+      persistedAssignmentId: staleAssignmentId,
       liveAssignmentId,
+      messageIds: requeued,
     });
-    worker.currentAssignmentId = null;
-    worker.currentTaskId = null;
-    worker.currentMessageId = null;
+    clearWorkerAssignmentState(worker);
   }
   if (!worker.currentAssignmentId) {
     worker.status = 'idle';
@@ -1153,10 +1258,10 @@ function reconcileBridgeRuntimeState(state, workerId, bridgeState = {}) {
   worker.lastDispatchFailureAt = 0;
   worker.heartbeatAt = now();
 }
-
 function releaseWorkerBinding(state, workerId, reason = 'worker binding lost') {
   const worker = state.workers[workerId];
   if (!worker) return false;
+  const assignmentId = worker.currentAssignmentId;
   if (worker.currentTaskId) {
     const task = state.tasks[worker.currentTaskId];
     if (task?.status === 'running' && task.assignedWorkerId === workerId) {
@@ -1168,22 +1273,15 @@ function releaseWorkerBinding(state, workerId, reason = 'worker binding lost') {
       appendJournal(state, 'task.requeued', `${task.id} requeued because ${workerId} became stale`);
     }
   }
-  if (worker.currentMessageId) {
-    const message = state.messages.find((item) => item.id === worker.currentMessageId);
-    if (message?.status === 'running') {
-      message.status = 'queued';
-      message.assignmentId = null;
-      message.lastDeferredReason = `${reason}; message requeued`;
-      appendJournal(state, 'message.requeued', `${message.id} requeued because ${workerId} became stale`);
-    }
+  if (assignmentId) {
+    const requeued = requeueAssignmentMessages(state, worker, assignmentId, `${reason}; message requeued`);
+    for (const messageId of requeued) appendJournal(state, 'message.requeued', `${messageId} requeued because ${workerId} became stale`);
   }
   worker.lastTabId = Number.isInteger(worker.tabId) ? worker.tabId : worker.lastTabId;
   worker.tabId = null;
   worker.windowId = null;
   worker.activeWindowId = null;
-  worker.currentAssignmentId = null;
-  worker.currentTaskId = null;
-  worker.currentMessageId = null;
+  clearWorkerAssignmentState(worker);
   worker.busy = false;
   worker.status = 'stale';
   worker.lifecycle = 'stale';
@@ -1195,7 +1293,6 @@ function releaseWorkerBinding(state, workerId, reason = 'worker binding lost') {
   appendJournal(state, 'worker.stale', `${workerId} binding released`, { reason });
   return true;
 }
-
 async function markWorkerBindingStale(tabId, reason = 'tab closed') {
   if (!Number.isInteger(tabId)) return false;
   const { result } = await mutateFleet((state) => {
@@ -1253,14 +1350,27 @@ function upsertWorker(state, tab, patch = {}) {
     enabled: patch.enabled !== undefined ? patch.enabled === true : existing.enabled !== false,
     status: existing.status || 'idle',
     currentAssignmentId: existing.currentAssignmentId || null,
+    currentAssignmentKind: existing.currentAssignmentKind || '',
+    currentAssignmentStartedAt: Number(existing.currentAssignmentStartedAt || 0),
     currentTaskId: existing.currentTaskId || null,
     currentMessageId: existing.currentMessageId || null,
+    currentMessageIds: Array.isArray(existing.currentMessageIds)
+      ? existing.currentMessageIds.slice()
+      : (existing.currentMessageId ? [existing.currentMessageId] : []),
+    controlInbox: Array.isArray(existing.controlInbox) ? existing.controlInbox.slice(-MAX_CONTROL_NOTICES) : [],
+    currentControlNoticeIds: Array.isArray(existing.currentControlNoticeIds) ? existing.currentControlNoticeIds.slice() : [],
     title: tab.title || existing.title || '',
     url: tab.url || existing.url || '',
     busy: patch.busy !== undefined ? patch.busy === true : existing.busy === true,
     heartbeatAt: patch.heartbeatAt || existing.heartbeatAt || 0,
     progressVersion: Number(existing.progressVersion || 0),
     lastResultAt: existing.lastResultAt || 0,
+    lastResponseTerminalAt: Number(existing.lastResponseTerminalAt || 0),
+    lastAssignmentReleasedAt: Number(existing.lastAssignmentReleasedAt || 0),
+    lastCompletionReleaseLagMs: Math.max(0, Number(existing.lastCompletionReleaseLagMs || 0)),
+    completionReleaseLagCount: Math.max(0, Number(existing.completionReleaseLagCount || 0)),
+    completionReleaseLagTotalMs: Math.max(0, Number(existing.completionReleaseLagTotalMs || 0)),
+    completionReleaseLagMaxMs: Math.max(0, Number(existing.completionReleaseLagMaxMs || 0)),
     chatTurnCount: Math.max(0, Math.trunc(Number(existing.chatTurnCount || 0))),
     chatRotationPending: existing.chatRotationPending === true
       || Math.max(0, Math.trunc(Number(existing.chatTurnCount || 0))) >= boundedMaxTurnsPerChat(state.policy.maxTurnsPerChat),
@@ -1450,9 +1560,32 @@ function coordinatorProtocolText() {
   ].join('\n');
 }
 
+function currentControlNotices(worker) {
+  const selected = new Set(Array.isArray(worker?.currentControlNoticeIds) ? worker.currentControlNoticeIds : []);
+  return (Array.isArray(worker?.controlInbox) ? worker.controlInbox : [])
+    .filter((notice) => selected.has(notice.id));
+}
+
+function controlFeedbackText(worker) {
+  const notices = currentControlNotices(worker);
+  if (!notices.length) return '';
+  return [
+    '[MODEL FLEET CONTROL FEEDBACK]',
+    `Control notices: ${notices.length}`,
+    'These are scheduler/control-plane facts already in your durable worker inbox. Incorporate them while handling the current assignment; do not ask for a duplicate semantic message.',
+    ...notices.flatMap((notice) => [
+      `--- CONTROL ${notice.id} · ${notice.type || 'notice'}${notice.taskId ? ` · task ${notice.taskId}` : ''} ---`,
+      String(notice.body || '').trim(),
+      `--- END CONTROL ${notice.id} ---`,
+    ]),
+    '[/MODEL FLEET CONTROL FEEDBACK]',
+  ].join('\n');
+}
+
 function buildTaskPrompt(state, task, worker) {
   const taskContract = ROLE_CATALOG.find((role) => role.id === canonicalRole(task.role)) || ROLE_CATALOG[0];
   const workerContract = ROLE_CATALOG.find((role) => role.id === canonicalRole(worker.role)) || ROLE_CATALOG[0];
+  const controlFeedback = controlFeedbackText(worker);
   const separationNote = canonicalRole(task.role) === 'coordinator'
     ? 'Coordinator control loop only: decompose, route, observe, replan, and escalate. Do not perform specialist implementation, review, test, architecture, research, or integration work yourself.'
     : 'Do not claim authority beyond this contract or verify work you completed yourself.';
@@ -1472,6 +1605,8 @@ function buildTaskPrompt(state, task, worker) {
     `Task: ${task.id} — ${task.title}`,
     state.goal ? `Fleet goal: ${state.goal}` : 'Fleet goal: not set',
     '',
+    controlFeedback,
+    controlFeedback ? '' : '',
     canonicalRole(task.role) === 'coordinator' ? coordinatorProtocolText() : '',
     canonicalRole(task.role) === 'coordinator' ? '' : '',
     task.prompt,
@@ -1488,24 +1623,61 @@ function buildTaskPrompt(state, task, worker) {
   ].join('\n');
 }
 
-function buildMessagePrompt(state, message, worker) {
-  const from = message.fromWorkerId || message.from || 'operator';
+function buildMessagePrompt(state, messageOrMessages, worker) {
+  const controlFeedback = controlFeedbackText(worker);
+  const messages = (Array.isArray(messageOrMessages) ? messageOrMessages : [messageOrMessages])
+    .filter(Boolean)
+    .sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+  const blocks = messages.flatMap((message) => {
+    const from = message.fromWorkerId || message.from || 'operator';
+    return [
+      `--- MESSAGE ${message.id} ---`,
+      `From: ${from}`,
+      message.taskId ? `Related task: ${message.taskId}` : 'Related task: none',
+      '',
+      message.body,
+      `--- END MESSAGE ${message.id} ---`,
+      '',
+    ];
+  });
   return [
     '[MODEL FLEET MESSAGE]',
     `Recipient: ${worker.id}`,
-    `From: ${from}`,
-    message.taskId ? `Related task: ${message.taskId}` : 'Related task: none',
+    `Batch size: ${messages.length}`,
+    messages.length > 1
+      ? 'Process every message in this batch in the listed order during this single turn. Preserve each message identity and satisfy all non-conflicting instructions; do not require one ChatGPT turn per message.'
+      : 'Process the message below during this turn.',
     '',
-    message.body,
-    '',
-    'Respond by acting on the message. You may use tools actually available in this ChatGPT session, including chatgpt-mcp-connector when available.',
+    ...blocks,
+    controlFeedback,
+    controlFeedback ? '' : '',
+    'Respond by acting on all messages in this batch. You may use tools actually available in this ChatGPT session, including chatgpt-mcp-connector when available.',
     '',
     canonicalRole(worker.role) === 'coordinator' ? coordinatorProtocolText() : '',
     canonicalRole(worker.role) === 'coordinator' ? '' : '',
     'Registered peer routing targets:',
     peerSummary(state, worker.id),
-    'When the instruction requires sending to another worker, use that peer exact W-... ID in the FLEET_MESSAGE to= field.',
+    'When an instruction requires sending to another worker, use that peer exact W-... ID in the FLEET_MESSAGE to= field.',
     'Do not guess or invent a worker ID that is not listed above.',
+    '',
+    fleetProtocolText(),
+    '[/MODEL FLEET MESSAGE]',
+  ].join('\n');
+}
+
+function buildControlPrompt(state, worker) {
+  return [
+    '[MODEL FLEET MESSAGE]',
+    `Recipient: ${worker.id}`,
+    'Batch size: 0 semantic messages',
+    '',
+    controlFeedbackText(worker),
+    '',
+    'Act on the control feedback now. This control-plane inbox is separate from semantic peer traffic.',
+    canonicalRole(worker.role) === 'coordinator' ? coordinatorProtocolText() : '',
+    '',
+    'Registered peer routing targets:',
+    peerSummary(state, worker.id),
     '',
     fleetProtocolText(),
     '[/MODEL FLEET MESSAGE]',
@@ -1661,6 +1833,62 @@ function queueSemanticMessage(state, {
   if (state.messages.length > MAX_MESSAGES) state.messages.splice(0, state.messages.length - MAX_MESSAGES);
   appendJournal(state, 'message.queued', `${id}: ${fromWorkerId || from || 'operator'} → ${toWorkerId}`, { taskId });
   return message;
+}
+
+function queueWorkerControlNotice(state, workerId, {
+  type = 'control',
+  body,
+  taskId = null,
+  relatedAssignmentId = null,
+} = {}) {
+  const worker = state.workers[workerId];
+  if (!worker) return null;
+  if (!Array.isArray(worker.controlInbox)) worker.controlInbox = [];
+  const notice = {
+    id: `C-${state.generation + 1}-${now()}-${worker.controlInbox.length + 1}`,
+    type: String(type || 'control'),
+    body: String(body || '').trim(),
+    taskId: taskId || null,
+    relatedAssignmentId: relatedAssignmentId || null,
+    createdAt: now(),
+  };
+  if (!notice.body) return null;
+  worker.controlInbox.push(notice);
+  if (worker.controlInbox.length > MAX_CONTROL_NOTICES) {
+    worker.controlInbox.splice(0, worker.controlInbox.length - MAX_CONTROL_NOTICES);
+  }
+  appendJournal(state, 'control.queued', `${notice.id} queued for ${workerId}`, {
+    workerId,
+    taskId: notice.taskId,
+    type: notice.type,
+  });
+  return notice;
+}
+
+function captureControlNoticeIds(worker) {
+  return (Array.isArray(worker?.controlInbox) ? worker.controlInbox : [])
+    .slice(0, MAX_CONTROL_NOTICES)
+    .map((notice) => notice.id);
+}
+
+function selectMessageBatch(state, seed) {
+  if (!seed) return [];
+  if (seed.requiresFleetMessage === true) return [seed];
+  const candidates = state.messages
+    .filter((message) => message.status === 'queued'
+      && message.toWorkerId === seed.toWorkerId
+      && message.requiresFleetMessage !== true)
+    .sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+  const batch = [];
+  let chars = 0;
+  for (const message of candidates) {
+    const cost = String(message.body || '').length + 256;
+    if (batch.length && (batch.length >= MAX_MESSAGE_BATCH_SIZE || chars + cost > MAX_MESSAGE_BATCH_CHARS)) break;
+    batch.push(message);
+    chars += cost;
+    if (batch.length >= MAX_MESSAGE_BATCH_SIZE) break;
+  }
+  return batch.length ? batch : [seed];
 }
 
 function routeParsedMessages(state, fromWorkerId, parsed, taskId) {
@@ -1839,17 +2067,29 @@ function chooseDispatches(state) {
   const queuedMessages = state.messages
     .filter((m) => m.status === 'queued' && m.toWorkerId !== 'operator')
     .sort((a, b) => a.createdAt - b.createdAt);
+  const reservedMessages = new Set();
 
   for (const message of queuedMessages) {
     if (active >= maxConcurrency) break;
+    if (reservedMessages.has(message.id) || message.status !== 'queued') continue;
     const worker = state.workers[message.toWorkerId];
     if (!worker || !available().some((w) => w.id === worker.id)) continue;
-    const assignmentId = `A-M-${message.id}-${state.generation + 1}`;
-    message.status = 'running';
-    message.assignmentId = assignmentId;
-    message.deliveredAt = now();
+    const batch = selectMessageBatch(state, message).filter((item) => !reservedMessages.has(item.id));
+    if (!batch.length) continue;
+    const assignmentId = `A-M-${batch[0].id}-${state.generation + 1}`;
+    const deliveredAt = now();
+    for (const item of batch) {
+      item.status = 'running';
+      item.assignmentId = assignmentId;
+      item.deliveredAt = deliveredAt;
+      reservedMessages.add(item.id);
+    }
     worker.currentAssignmentId = assignmentId;
-    worker.currentMessageId = message.id;
+    worker.currentAssignmentKind = 'message';
+    worker.currentAssignmentStartedAt = deliveredAt;
+    worker.currentMessageIds = batch.map((item) => item.id);
+    worker.currentMessageId = worker.currentMessageIds[0] || null;
+    worker.currentControlNoticeIds = captureControlNoticeIds(worker);
     worker.status = 'activating';
     worker.lifecycle = 'activating';
     worker.warmIdleSince = 0;
@@ -1860,12 +2100,18 @@ function chooseDispatches(state) {
       assignment: {
         id: assignmentId,
         kind: 'message',
-        messageId: message.id,
-        prompt: buildMessagePrompt(state, message, worker),
+        messageId: batch[0].id,
+        messageIds: batch.map((item) => item.id),
+        controlNoticeIds: worker.currentControlNoticeIds.slice(),
+        prompt: buildMessagePrompt(state, batch, worker),
       },
     });
     active += 1;
-    appendJournal(state, 'message.reserved', `${message.id} reserved for ${worker.id}`);
+    appendJournal(state, batch.length > 1 ? 'message.batch_reserved' : 'message.reserved',
+      batch.length > 1
+        ? `${batch.length} messages (${batch[0].id}…${batch[batch.length - 1].id}) reserved for ${worker.id}`
+        : `${batch[0].id} reserved for ${worker.id}`,
+      { assignmentId, messageIds: batch.map((item) => item.id), count: batch.length });
   }
 
   const tasks = Object.values(state.tasks)
@@ -1888,7 +2134,12 @@ function chooseDispatches(state) {
     task.startedAt = now();
     task.attempts = Number(task.attempts || 0) + 1;
     worker.currentAssignmentId = assignmentId;
+    worker.currentAssignmentKind = 'task';
+    worker.currentAssignmentStartedAt = task.startedAt;
     worker.currentTaskId = task.id;
+    worker.currentMessageId = null;
+    worker.currentMessageIds = [];
+    worker.currentControlNoticeIds = captureControlNoticeIds(worker);
     worker.status = 'activating';
     worker.lifecycle = 'activating';
     worker.warmIdleSince = 0;
@@ -1900,11 +2151,50 @@ function chooseDispatches(state) {
         id: assignmentId,
         kind: 'task',
         taskId: task.id,
+        controlNoticeIds: worker.currentControlNoticeIds.slice(),
         prompt: buildTaskPrompt(state, task, worker),
       },
     });
     active += 1;
     appendJournal(state, 'task.reserved', `${task.id} reserved for ${worker.id}`, { assignmentId });
+  }
+
+
+  // Control-plane feedback is a typed worker inbox. It piggybacks on normal
+  // work above, and receives one bounded control-only turn only when no normal
+  // work claimed that worker.
+  for (const worker of available()) {
+    if (active >= maxConcurrency) break;
+    if (!Array.isArray(worker.controlInbox) || !worker.controlInbox.length) continue;
+    const controlNoticeIds = captureControlNoticeIds(worker);
+    if (!controlNoticeIds.length) continue;
+    const assignmentId = `A-C-${worker.id}-${state.generation + 1}`;
+    worker.currentAssignmentId = assignmentId;
+    worker.currentAssignmentKind = 'control';
+    worker.currentAssignmentStartedAt = now();
+    worker.currentTaskId = null;
+    worker.currentMessageId = null;
+    worker.currentMessageIds = [];
+    worker.currentControlNoticeIds = controlNoticeIds;
+    worker.status = 'activating';
+    worker.lifecycle = 'activating';
+    worker.warmIdleSince = 0;
+    worker.warmIdleUntil = 0;
+    dispatches.push({
+      workerId: worker.id,
+      tabId: worker.tabId,
+      assignment: {
+        id: assignmentId,
+        kind: 'control',
+        controlNoticeIds: controlNoticeIds.slice(),
+        prompt: buildControlPrompt(state, worker),
+      },
+    });
+    active += 1;
+    appendJournal(state, 'control.reserved', `${controlNoticeIds.length} control notice(s) reserved for ${worker.id}`, {
+      assignmentId,
+      controlNoticeIds,
+    });
   }
 
   return dispatches;
@@ -1915,10 +2205,18 @@ async function failDispatch(dispatch, error) {
   const { result } = await mutateFleet((state) => {
     const worker = state.workers[dispatch.workerId];
     const blockWorker = !state.policy.paused && state.policy.authorityEnabled;
+    let failedMessageIds = [];
     if (worker?.currentAssignmentId === dispatch.assignment.id) {
-      worker.currentAssignmentId = null;
-      worker.currentTaskId = null;
-      worker.currentMessageId = null;
+      if (dispatch.assignment.kind === 'message') {
+        failedMessageIds = requeueAssignmentMessages(state, worker, dispatch.assignment.id, 'target worker blocked after dispatch failure: ' + errorText);
+        for (const messageId of failedMessageIds) {
+          const message = state.messages.find((item) => item.id === messageId);
+          if (!message) continue;
+          message.lastDispatchError = errorText;
+          message.dispatchFailureCount = Number(message.dispatchFailureCount || 0) + 1;
+        }
+      }
+      clearWorkerAssignmentState(worker);
       worker.status = worker.enabled ? (blockWorker ? 'blocked' : 'idle') : 'offline';
       worker.lifecycle = worker.enabled ? 'idle' : 'offline';
       worker.busy = false;
@@ -1936,32 +2234,26 @@ async function failDispatch(dispatch, error) {
         task.assignmentId = null;
         task.statusNote = 'dispatch failed on ' + dispatch.workerId + ': ' + errorText;
       }
-    } else {
-      const message = state.messages.find((m) => m.id === dispatch.assignment.messageId);
-      if (message?.assignmentId === dispatch.assignment.id) {
-        message.status = 'queued';
-        message.assignmentId = null;
-        message.lastDispatchError = errorText;
-        message.dispatchFailureCount = Number(message.dispatchFailureCount || 0) + 1;
-        if (blockWorker) {
-          message.lastDeferredReason = 'target worker blocked after dispatch failure: ' + errorText;
-        }
-      }
     }
     appendJournal(state, 'dispatch.failed', dispatch.assignment.id + ' failed: ' + errorText, {
       error: errorText,
       workerBlocked: !!worker && worker.status === 'blocked',
+      messageIds: failedMessageIds,
     });
     return { workerBlocked: !!worker && worker.status === 'blocked' };
   });
   return result || { workerBlocked: false };
 }
-
 async function journalDeferredMessages(preview, reason) {
   const queued = preview.messages.filter((message) => message.status === 'queued' && message.toWorkerId !== 'operator');
   if (queued.length) await mutateFleet((state) => {
+    const groups = new Map();
     for (const message of queued) {
-      const target = state.workers[message.toWorkerId];
+      if (!groups.has(message.toWorkerId)) groups.set(message.toWorkerId, []);
+      groups.get(message.toWorkerId).push(message.id);
+    }
+    for (const [workerId, messageIds] of groups) {
+      const target = state.workers[workerId];
       let detail = reason;
       if (!target) detail = 'target worker missing';
       else if (!target.enabled) detail = 'target worker disabled';
@@ -1969,9 +2261,34 @@ async function journalDeferredMessages(preview, reason) {
       else if (target.lifecycle === 'stale' || !Number.isInteger(target.tabId)) detail = 'target worker stale or unbound';
       else if (target.status === 'blocked') detail = 'target worker blocked';
       else if (workerBusyIsFresh(target)) detail = 'target worker busy with fresh heartbeat';
-      if (message.lastDeferredReason === detail) continue;
-      message.lastDeferredReason = detail;
-      appendJournal(state, 'schedule.deferred', `${message.id} → ${message.toWorkerId}: ${detail}`);
+      let changed = false;
+      let oldestAt = 0;
+      for (const messageId of messageIds) {
+        const message = state.messages.find((item) => item.id === messageId);
+        if (!message || message.status !== 'queued') continue;
+        const createdAt = Number(message.createdAt || 0);
+        if (createdAt > 0 && (!oldestAt || createdAt < oldestAt)) oldestAt = createdAt;
+        if (message.lastDeferredReason !== detail) {
+          message.lastDeferredReason = detail;
+          changed = true;
+        }
+      }
+      const count = messageIds.length;
+      const summaryKey = `${detail}|${count}`;
+      if (target && target.lastDeferredSummaryKey !== summaryKey) {
+        target.lastDeferredSummaryKey = summaryKey;
+        changed = true;
+      }
+      if (!changed) continue;
+      const behind = target?.currentAssignmentId
+        ? `${count} queued behind ${target.currentAssignmentId}`
+        : `${count} queued · ${detail}`;
+      appendJournal(state, 'schedule.deferred_group', `${workerId}: ${behind}`, {
+        workerId,
+        count,
+        oldestQueueAgeMs: oldestAt ? Math.max(0, now() - oldestAt) : 0,
+        reason: detail,
+      });
     }
   });
   for (const task of Object.values(preview.tasks)) {
@@ -2042,12 +2359,25 @@ async function dispatchReserved(dispatch) {
         tabId: dispatch.tabId,
       });
       if (dispatch.assignment.kind === 'message') {
-        appendJournal(state, 'message.sent', `${dispatch.assignment.messageId} sent to ${dispatch.workerId}`, {
+        const messageIds = Array.isArray(dispatch.assignment.messageIds) && dispatch.assignment.messageIds.length
+          ? dispatch.assignment.messageIds
+          : [dispatch.assignment.messageId].filter(Boolean);
+        appendJournal(
+          state,
+          messageIds.length > 1 ? 'message.batch_sent' : 'message.sent',
+          messageIds.length > 1
+            ? `${messageIds.length} messages (${messageIds[0]}…${messageIds[messageIds.length - 1]}) sent to ${dispatch.workerId}`
+            : `${messageIds[0]} sent to ${dispatch.workerId}`,
+          { assignmentId: dispatch.assignment.id, messageIds, count: messageIds.length },
+        );
+      } else if (dispatch.assignment.kind === 'task') {
+        appendJournal(state, 'task.started', `${dispatch.assignment.taskId} started by ${dispatch.workerId}`, {
           assignmentId: dispatch.assignment.id,
         });
       } else {
-        appendJournal(state, 'task.started', `${dispatch.assignment.taskId} started by ${dispatch.workerId}`, {
+        appendJournal(state, 'control.started', `${dispatch.assignment.controlNoticeIds?.length || 0} control notice(s) started by ${dispatch.workerId}`, {
           assignmentId: dispatch.assignment.id,
+          controlNoticeIds: dispatch.assignment.controlNoticeIds || [],
         });
       }
     });
@@ -2103,11 +2433,22 @@ async function schedule() {
     const runnableTasks = Object.values(preview.tasks).filter((task) => taskRunnable(preview, task));
     const hasRunnableTask = runnableTasks.length > 0;
     const hasDispatchableTask = runnableTasks.some((task) => Object.values(preview.workers).some((worker) => workerMatches(worker, task, preview)));
-    if (!hasQueuedMessage && !hasRunnableTask) {
+    const controlWorkers = Object.values(preview.workers).filter((worker) => Array.isArray(worker.controlInbox) && worker.controlInbox.length > 0);
+    const hasControlWork = controlWorkers.length > 0;
+    const hasDispatchableControl = controlWorkers.some((worker) => worker.enabled
+      && !worker.currentAssignmentId
+      && !workerBusyIsFresh(worker)
+      && Number(worker.pageBusyUntil || 0) <= now()
+      && worker.status !== 'blocked'
+      && !worker.chatRotationPending
+      && worker.lifecycle !== 'parking'
+      && worker.lifecycle !== 'stale'
+      && Number.isInteger(worker.tabId));
+    if (!hasQueuedMessage && !hasRunnableTask && !hasControlWork) {
       await journalDeferredMessages(preview, 'no runnable work');
       return;
     }
-    if (!hasDispatchableMessage && !hasDispatchableTask) {
+    if (!hasDispatchableMessage && !hasDispatchableTask && !hasDispatchableControl) {
       await journalDeferredMessages(preview, hasQueuedMessage ? 'target not currently eligible' : 'no eligible worker');
       return;
     }
@@ -2171,18 +2512,24 @@ async function completeAssignment(senderTabId, payload) {
     if (!worker || worker.currentAssignmentId !== payload.assignmentId) return;
 
     const finishedTaskId = worker.currentTaskId;
-    const finishedMessageId = worker.currentMessageId;
-    const sourceMessage = finishedMessageId
-      ? state.messages.find((message) => message.id === finishedMessageId)
-      : null;
+    const finishedMessageIds = assignmentMessageIds(worker);
+    const sourceMessages = state.messages
+      .filter((message) => finishedMessageIds.includes(message.id) && message.assignmentId === payload.assignmentId)
+      .sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+    const sourceMessage = sourceMessages.find((message) => message.requiresFleetMessage === true) || sourceMessages[0] || null;
+    const activeControlNoticeIds = assignmentControlNoticeIds(worker);
+    const activeControlNotices = (Array.isArray(worker.controlInbox) ? worker.controlInbox : [])
+      .filter((notice) => activeControlNoticeIds.includes(notice.id));
 
-    const relatedTaskId = finishedTaskId || sourceMessage?.taskId || null;
+    const relatedTaskId = finishedTaskId
+      || sourceMessages.find((message) => message.taskId)?.taskId
+      || activeControlNotices.find((notice) => notice.taskId)?.taskId
+      || null;
     const routeResult = routeParsedMessages(state, workerId, parsed, relatedTaskId);
     const childTaskResult = routeCoordinatorTasks(state, workerId, parsed, relatedTaskId);
     if (childTaskResult.failures.length) {
-      queueSemanticMessage(state, {
-        from: 'scheduler',
-        toWorkerId: workerId,
+      queueWorkerControlNotice(state, workerId, {
+        type: 'child-task-creation-failure',
         body: [
           'COORDINATOR CHILD-TASK CREATION FAILURE.',
           'One or more FLEET_TASK envelopes were rejected by the control plane.',
@@ -2190,6 +2537,7 @@ async function completeAssignment(senderTabId, payload) {
           'Observe the failure, replan, and emit corrected child tasks if still required.',
         ].join('\n'),
         taskId: relatedTaskId,
+        relatedAssignmentId: payload.assignmentId,
       });
     }
     const repairReason = protocolRepairReason(parsed, routeResult, sourceMessage);
@@ -2216,7 +2564,7 @@ async function completeAssignment(senderTabId, payload) {
         {
           workerId,
           taskId: finishedTaskId || null,
-          messageId: finishedMessageId || null,
+          messageIds: finishedMessageIds,
           reason: repairReason,
           repairMessageId: repairMessage?.id || null,
         },
@@ -2247,27 +2595,33 @@ async function completeAssignment(senderTabId, payload) {
       }
     }
 
-    if (finishedMessageId) {
-      const message = state.messages.find((m) => m.id === finishedMessageId);
-      if (message?.assignmentId === payload.assignmentId) {
-        message.status = repairExhausted ? 'blocked' : 'done';
-        message.completedAt = now();
-        message.response = responseText;
-        if (repairMessage) message.protocolRepairMessageId = repairMessage.id;
-        appendJournal(
-          state,
-          repairExhausted ? 'message.protocol_repair_failed' : 'message.completed',
-          repairExhausted
-            ? `${message.id} exhausted peer-routing repair at ${workerId}`
-            : `${message.id} handled by ${workerId}`,
-        );
-      }
+    for (const message of sourceMessages) {
+      message.status = repairExhausted && message.id === sourceMessage?.id ? 'blocked' : 'done';
+      message.completedAt = now();
+      message.response = responseText;
+      if (repairMessage && message.id === sourceMessage?.id) message.protocolRepairMessageId = repairMessage.id;
+    }
+    if (sourceMessages.length) {
+      appendJournal(
+        state,
+        repairExhausted ? 'message.protocol_repair_failed' : (sourceMessages.length > 1 ? 'message.batch_completed' : 'message.completed'),
+        repairExhausted
+          ? `${sourceMessage?.id || sourceMessages[0].id} exhausted peer-routing repair at ${workerId}`
+          : sourceMessages.length > 1
+            ? `${sourceMessages.length} messages (${sourceMessages[0].id}…${sourceMessages[sourceMessages.length - 1].id}) handled by ${workerId}`
+            : `${sourceMessages[0].id} handled by ${workerId}`,
+        { messageIds: sourceMessages.map((message) => message.id), count: sourceMessages.length },
+      );
     }
 
-    appendJournal(state, 'assignment.parsed', `${payload.assignmentId}: ${parsed.messages.length} semantic message(s), marker=${parsed.markerPresent ? 'yes' : 'no'}, state=${parsed.state}`, {
+    const consumedControlNoticeIds = consumeAssignmentControlNotices(worker);
+    appendJournal(state, 'assignment.parsed', `${payload.assignmentId}: ${parsed.messages.length} routed semantic message(s), batch=${sourceMessages.length}, marker=${parsed.markerPresent ? 'yes' : 'no'}, state=${parsed.state}`, {
       workerId,
       taskId: finishedTaskId || null,
+      sourceMessageIds: finishedMessageIds,
+      sourceMessageCount: sourceMessages.length,
       messageCount: parsed.messages.length,
+      consumedControlNoticeIds,
       childTaskCount: childTaskResult.created.length,
       childTaskFailureCount: childTaskResult.failures.length,
       markerPresent: parsed.markerPresent,
@@ -2277,15 +2631,32 @@ async function completeAssignment(senderTabId, payload) {
       routeFailureCount: routeResult.failures.length,
       protocolRepairMessageId: repairMessage?.id || null,
     });
-    worker.currentAssignmentId = null;
-    worker.currentTaskId = null;
-    worker.currentMessageId = null;
+
+    const releasedAt = now();
+    const responseTerminalAt = Math.max(0, Number(payload.responseTerminalAt || 0));
+    worker.lastAssignmentReleasedAt = releasedAt;
+    if (responseTerminalAt > 0) {
+      const lagMs = Math.max(0, releasedAt - responseTerminalAt);
+      worker.lastResponseTerminalAt = responseTerminalAt;
+      worker.lastCompletionReleaseLagMs = lagMs;
+      worker.completionReleaseLagCount = Math.max(0, Number(worker.completionReleaseLagCount || 0)) + 1;
+      worker.completionReleaseLagTotalMs = Math.max(0, Number(worker.completionReleaseLagTotalMs || 0)) + lagMs;
+      worker.completionReleaseLagMaxMs = Math.max(Math.max(0, Number(worker.completionReleaseLagMaxMs || 0)), lagMs);
+      appendJournal(state, 'assignment.release_lag', `${payload.assignmentId}: response terminal → assignment released ${lagMs}ms`, {
+        workerId,
+        responseTerminalAt,
+        assignmentReleasedAt: releasedAt,
+        lagMs,
+      });
+    }
+
+    clearWorkerAssignmentState(worker);
     worker.status = 'idle';
     worker.lifecycle = 'idle';
     worker.busy = false;
-    worker.lastResultAt = now();
+    worker.lastResultAt = releasedAt;
     worker.progressVersion = Number(worker.progressVersion || 0) + 1;
-    worker.heartbeatAt = now();
+    worker.heartbeatAt = releasedAt;
   });
   const completed = await loadFleetState();
   if (completed.workers[workerId]?.chatRotationPending) {
@@ -2296,7 +2667,6 @@ async function completeAssignment(senderTabId, payload) {
   schedule().catch(() => {});
   return publicSnapshot(await loadFleetState());
 }
-
 async function flushWorkerHeartbeats() {
   if (heartbeatFlushPromise) return heartbeatFlushPromise;
   const batch = new Map(liveHeartbeats);
@@ -2380,6 +2750,7 @@ async function reconcileOnHello(tab, payload = {}) {
       && liveAssignmentId === worker.currentAssignmentId;
 
     if (worker.currentAssignmentId && !preserveActivatingReservation && !preserveLiveAssignment) {
+      const staleAssignmentId = worker.currentAssignmentId;
       if (worker.currentTaskId) {
         const task = state.tasks[worker.currentTaskId];
         if (task?.status === 'running') {
@@ -2390,16 +2761,9 @@ async function reconcileOnHello(tab, payload = {}) {
           appendJournal(state, 'task.requeued', `${task.id} requeued after ${workerId} page lifecycle restart`);
         }
       }
-      if (worker.currentMessageId) {
-        const message = state.messages.find((m) => m.id === worker.currentMessageId);
-        if (message?.status === 'running') {
-          message.status = 'queued';
-          message.assignmentId = null;
-        }
-      }
-      worker.currentAssignmentId = null;
-      worker.currentTaskId = null;
-      worker.currentMessageId = null;
+      const requeued = requeueAssignmentMessages(state, worker, staleAssignmentId, `${workerId} page lifecycle restart`);
+      for (const messageId of requeued) appendJournal(state, 'message.requeued', `${messageId} requeued after ${workerId} page lifecycle restart`);
+      clearWorkerAssignmentState(worker);
       worker.status = 'idle';
       worker.lifecycle = 'idle';
       worker.busy = false;
@@ -2427,7 +2791,6 @@ async function reconcileOnHello(tab, payload = {}) {
   schedule().catch(() => {});
   return { registered: !!result, worker: result, snapshot: publicSnapshot(state) };
 }
-
 async function updateBadge(tabId, approvalState = null) {
   if (!Number.isInteger(tabId)) return;
   const tab = await supportedTab(tabId);
@@ -2645,7 +3008,8 @@ function releaseWorkerAssignment(state, workerId, assignmentId, reason, {
 
   const releasedAssignmentId = worker.currentAssignmentId;
   const taskId = worker.currentTaskId;
-  const messageId = worker.currentMessageId;
+  const messageIds = assignmentMessageIds(worker);
+  const controlNoticeIds = assignmentControlNoticeIds(worker);
 
   if (taskId) {
     const task = state.tasks[taskId];
@@ -2663,23 +3027,22 @@ function releaseWorkerAssignment(state, workerId, assignmentId, reason, {
     }
   }
 
-  if (messageId) {
-    const semantic = state.messages.find((m) => m.id === messageId);
-    if (semantic?.assignmentId === releasedAssignmentId) {
-      semantic.assignmentId = null;
-      if (requeue) {
-        semantic.status = 'queued';
-      } else {
-        semantic.status = terminalStatus;
-        semantic.completedAt = now();
-        semantic.lastDispatchError = reason || '';
-      }
+  for (const messageId of messageIds) {
+    const semantic = state.messages.find((message) => message.id === messageId);
+    if (semantic?.assignmentId !== releasedAssignmentId) continue;
+    semantic.assignmentId = null;
+    if (requeue) {
+      semantic.status = 'queued';
+    } else {
+      semantic.status = terminalStatus;
+      semantic.completedAt = now();
+      semantic.lastDispatchError = reason || '';
     }
   }
 
-  worker.currentAssignmentId = null;
-  worker.currentTaskId = null;
-  worker.currentMessageId = null;
+  // A cancellation/recovery does not consume control notices; they remain in
+  // the typed inbox for the retry or the next valid assignment.
+  clearWorkerAssignmentState(worker);
   worker.status = 'idle';
   worker.lifecycle = 'idle';
   worker.busy = false;
@@ -2690,13 +3053,22 @@ function releaseWorkerAssignment(state, workerId, assignmentId, reason, {
   appendJournal(state, eventType, `${worker.id} released ${releasedAssignmentId}`, {
     assignmentId: releasedAssignmentId,
     taskId: taskId || null,
-    messageId: messageId || null,
+    messageId: messageIds[0] || null,
+    messageIds,
+    controlNoticeIds,
     reason: reason || '',
     requeued: requeue,
   });
-  return { workerId, assignmentId: releasedAssignmentId, taskId, messageId, requeued: requeue };
+  return {
+    workerId,
+    assignmentId: releasedAssignmentId,
+    taskId,
+    messageId: messageIds[0] || null,
+    messageIds,
+    controlNoticeIds,
+    requeued: requeue,
+  };
 }
-
 async function cancelWorkerDispatch(workerId) {
   const initial = await loadFleetState();
   const worker = initial.workers[workerId];
@@ -2751,6 +3123,12 @@ async function stopAndFlushStaleWork() {
       .filter((worker) => worker.currentAssignmentId)
       .map((worker) => worker.id);
     let cancelledQueued = 0;
+    let cancelledControlNotices = 0;
+    for (const worker of Object.values(state.workers)) {
+      cancelledControlNotices += Array.isArray(worker.controlInbox) ? worker.controlInbox.length : 0;
+      worker.controlInbox = [];
+      worker.currentControlNoticeIds = [];
+    }
     for (const message of state.messages) {
       if (message.status !== 'queued' || message.toWorkerId === 'operator') continue;
       message.status = 'cancelled';
@@ -2762,8 +3140,9 @@ async function stopAndFlushStaleWork() {
     appendJournal(state, 'authority.stale_work_stop', 'Paused dispatch and flushed active and queued worker work', {
       activeAssignments: activeWorkerIds.length,
       cancelledQueued,
+      cancelledControlNotices,
     });
-    return { activeWorkerIds, cancelledQueued };
+    return { activeWorkerIds, cancelledQueued, cancelledControlNotices };
   });
 
   let cancelledActive = 0;
@@ -2788,6 +3167,7 @@ async function stopAndFlushStaleWork() {
     snapshot: publicSnapshot(state),
     cancelledActive,
     cancelledQueued: initial.cancelledQueued,
+    cancelledControlNotices: initial.cancelledControlNotices,
     cancellationWarnings,
   };
 }
@@ -3039,18 +3419,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       let recoveryAttempt = 0;
 
       if (autoRecovery && worker?.currentAssignmentId === message.assignmentId) {
-        const item = worker.currentTaskId
-          ? state.tasks[worker.currentTaskId]
-          : state.messages.find((entry) => entry.id === worker.currentMessageId);
-        const used = Number(item?.autoRecoveryAttempts || 0);
+        const taskItem = worker.currentTaskId ? state.tasks[worker.currentTaskId] : null;
+        const messageItems = assignmentMessageIds(worker)
+          .map((messageId) => state.messages.find((entry) => entry.id === messageId))
+          .filter(Boolean);
+        const controlItems = (Array.isArray(worker.controlInbox) ? worker.controlInbox : [])
+          .filter((notice) => assignmentControlNoticeIds(worker).includes(notice.id));
+        const items = taskItem ? [taskItem] : (messageItems.length ? messageItems : controlItems);
+        const used = items.reduce((max, item) => Math.max(max, Number(item?.autoRecoveryAttempts || 0)), 0);
         requeue = used < MAX_AUTO_RECOVERY_ATTEMPTS;
-        if (item) {
-          item.lastAutoRecoveryReason = reason.slice(AUTO_RECOVERY_REASON_PREFIX.length);
-          if (requeue) {
-            item.autoRecoveryAttempts = used + 1;
-            recoveryAttempt = item.autoRecoveryAttempts;
-          }
+        const recoveryReason = reason.slice(AUTO_RECOVERY_REASON_PREFIX.length);
+        for (const item of items) {
+          item.lastAutoRecoveryReason = recoveryReason;
+          if (requeue) item.autoRecoveryAttempts = used + 1;
         }
+        if (requeue) recoveryAttempt = used + 1;
         eventType = requeue ? 'assignment.recovery_queued' : 'assignment.recovery_exhausted';
         terminalStatus = requeue ? 'cancelled' : 'blocked';
       }
@@ -3061,15 +3444,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         terminalStatus,
       });
 
-      if (released && autoRecovery) {
-        const item = released.taskId
-          ? state.tasks[released.taskId]
-          : state.messages.find((entry) => entry.id === released.messageId);
-        if (item && requeue) {
-          const note = 'automatic recovery ' + recoveryAttempt + '/' + MAX_AUTO_RECOVERY_ATTEMPTS
-            + ': ' + item.lastAutoRecoveryReason;
-          if (released.taskId) item.statusNote = note;
-          else item.lastDeferredReason = note;
+      if (released && autoRecovery && requeue) {
+        const noteFor = (item) => 'automatic recovery ' + recoveryAttempt + '/' + MAX_AUTO_RECOVERY_ATTEMPTS
+          + ': ' + String(item?.lastAutoRecoveryReason || 'assignment recovery');
+        if (released.taskId) {
+          const task = state.tasks[released.taskId];
+          if (task) task.statusNote = noteFor(task);
+        }
+        for (const messageId of released.messageIds || []) {
+          const semantic = state.messages.find((entry) => entry.id === messageId);
+          if (semantic) semantic.lastDeferredReason = noteFor(semantic);
         }
       }
 

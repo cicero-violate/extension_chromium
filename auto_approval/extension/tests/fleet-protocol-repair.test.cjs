@@ -44,6 +44,6 @@ test('successful parsed deliveries remain durably queued before completion relea
   const start = source.indexOf('async function completeAssignment');
   const end = source.indexOf('async function flushWorkerHeartbeats', start);
   const block = source.slice(start, end);
-  assert.ok(block.indexOf('routeParsedMessages(state, workerId, parsed') < block.indexOf('worker.currentAssignmentId = null'));
+  assert.ok(block.indexOf('routeParsedMessages(state, workerId, parsed') < block.indexOf('clearWorkerAssignmentState(worker)'));
   assert.match(block, /routedMessageCount: routeResult\.queued\.length/);
 });
