@@ -214,3 +214,21 @@ Fix:
 Invariant:
 
 `FLEET ASSIGNMENT => NO AUTOMATIC DUPLICATE SEND BEFORE 15-MINUTE HARD CEILING`
+
+## Disabled Send button no longer drops fleet delivery
+
+A fleet assignment could be written into the ChatGPT composer while the Send button was temporarily unavailable. The worker waited only five seconds for the button, then rejected dispatch even though the prompt remained staged in the composer and the button could become usable later.
+
+Fix:
+
+- assignment custody is acknowledged before waiting for the Send button;
+- the worker enters a `preparing` phase and remains busy, so no other fleet message can collide with the staged prompt;
+- the staged prompt waits for Send readiness for the remaining 15-minute assignment budget instead of a five-second window;
+- the response baseline is captured immediately before the actual Send click;
+- only after Send is clicked does the assignment enter the normal response-monitoring phase;
+- a true pre-send failure uses the same bounded one-recovery policy, not an unbounded retry loop;
+- the hard 15-minute ceiling includes both preparation time and model execution time.
+
+Invariant:
+
+`FLEET ASSIGNMENT CUSTODY => WAIT FOR SEND READINESS => SEND => MONITOR RESPONSE`
