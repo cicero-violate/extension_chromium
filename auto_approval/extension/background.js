@@ -451,6 +451,42 @@ function roleContract(role) {
   return ROLE_CATALOG.find((item) => item.id === canonicalRole(role)) || ROLE_CATALOG[0];
 }
 
+const ROLE_MEMBER_LABELS = Object.freeze({
+  coordinator: 'Coordinator',
+  research: 'Researcher',
+  architect: 'Architect',
+  implementation: 'Implementor',
+  review: 'Reviewer',
+  test: 'Tester',
+  integrator: 'Integrator',
+});
+
+function workerRoleOrdinal(state, worker) {
+  if (!worker?.id) return 1;
+  const role = canonicalRole(worker.role);
+  const peers = Object.values(state?.workers || {})
+    .filter((candidate) => candidate?.enabled !== false
+      && candidate?.lifecycle !== 'stale'
+      && Number.isInteger(candidate?.tabId)
+      && canonicalRole(candidate.role) === role)
+    .sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
+  const index = peers.findIndex((candidate) => candidate.id === worker.id);
+  return index >= 0 ? index + 1 : 1;
+}
+
+function workerIdentityLabel(state, workerOrId) {
+  const worker = typeof workerOrId === 'string' ? state?.workers?.[workerOrId] : workerOrId;
+  if (!worker?.id) return String(workerOrId || 'unknown');
+  const role = canonicalRole(worker.role);
+  const label = ROLE_MEMBER_LABELS[role] || roleContract(role).label || role;
+  return `${worker.id} — ${label} #${workerRoleOrdinal(state, worker)}`;
+}
+
+function senderIdentityLabel(state, sender) {
+  const raw = String(sender || 'operator');
+  return state?.workers?.[raw] ? workerIdentityLabel(state, state.workers[raw]) : raw;
+}
+
 function roleContractPrompt(role, heading = 'Active role contract') {
   const contract = roleContract(role);
   return [
@@ -1517,7 +1553,7 @@ function peerSummary(state, workerId) {
   return Object.values(state.workers)
     .filter((w) => w.enabled && w.lifecycle !== 'stale' && Number.isInteger(w.tabId) && w.id !== workerId)
     .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
-    .map((w) => `- ${w.id}: ${w.role} (${w.status})`)
+    .map((w) => `- ${workerIdentityLabel(state, w)} (${w.status})`)
     .join('\n') || '- no other registered workers';
 }
 
@@ -1636,7 +1672,7 @@ function buildMessagePrompt(state, messageOrMessages, worker) {
     const from = message.fromWorkerId || message.from || 'operator';
     return [
       `--- MESSAGE ${message.id} ---`,
-      `From: ${from}`,
+      `From: ${senderIdentityLabel(state, from)}`,
       message.taskId ? `Related task: ${message.taskId}` : 'Related task: none',
       '',
       message.body,
@@ -1646,7 +1682,7 @@ function buildMessagePrompt(state, messageOrMessages, worker) {
   });
   return [
     '[MODEL FLEET MESSAGE]',
-    `Recipient: ${worker.id}`,
+    `Recipient: ${workerIdentityLabel(state, worker)}`,
     `Batch size: ${messages.length}`,
     messages.length > 1
       ? 'Process every message in this batch in the listed order during this single turn. Preserve each message identity and satisfy all non-conflicting instructions; do not require one ChatGPT turn per message.'
@@ -1672,7 +1708,7 @@ function buildMessagePrompt(state, messageOrMessages, worker) {
 function buildControlPrompt(state, worker) {
   return [
     '[MODEL FLEET MESSAGE]',
-    `Recipient: ${worker.id}`,
+    `Recipient: ${workerIdentityLabel(state, worker)}`,
     'Batch size: 0 semantic messages',
     '',
     controlFeedbackText(worker),

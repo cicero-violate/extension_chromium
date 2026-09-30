@@ -84,3 +84,25 @@ test('manual workers count toward desired role capacity', () => {
   assert.match(body, /Object\.values\(state\.workers\)/);
   assert.doesNotMatch(body, /topologyManaged/);
 });
+
+test('fleet message identities include human role labels and deterministic ordinals', () => {
+  const identityStart = background.indexOf('const ROLE_MEMBER_LABELS');
+  const identityEnd = background.indexOf('function roleContractPrompt', identityStart);
+  const identity = background.slice(identityStart, identityEnd);
+  assert.ok(identityStart >= 0 && identityEnd > identityStart);
+  assert.match(identity, /implementation: 'Implementor'/);
+  assert.match(identity, /integrator: 'Integrator'/);
+  assert.match(identity, /workerRoleOrdinal\(state, worker\)/);
+  assert.match(identity, /localeCompare\(String\(b\.id\).*numeric: true/);
+
+  const messageStart = background.indexOf('function buildMessagePrompt');
+  const messageEnd = background.indexOf('function buildControlPrompt', messageStart);
+  const messagePrompt = background.slice(messageStart, messageEnd);
+  assert.match(messagePrompt, /Recipient: \$\{workerIdentityLabel\(state, worker\)\}/);
+  assert.match(messagePrompt, /From: \$\{senderIdentityLabel\(state, from\)\}/);
+
+  const controlStart = background.indexOf('function buildControlPrompt');
+  const controlEnd = background.indexOf('function normalizeFleetProtocolSource', controlStart);
+  const controlPrompt = background.slice(controlStart, controlEnd);
+  assert.match(controlPrompt, /Recipient: \$\{workerIdentityLabel\(state, worker\)\}/);
+});
