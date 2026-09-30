@@ -9,8 +9,9 @@
   const els = {
     healthDot: $('healthDot'), healthText: $('healthText'), pauseAll: $('pauseAll'), stopFlushStale: $('stopFlushStale'), killAll: $('killAll'),
     goalInput: $('goalInput'), saveGoal: $('saveGoal'), workerMetric: $('workerMetric'), taskMetric: $('taskMetric'), messageMetric: $('messageMetric'),
-    generation: $('generation'), registerAll: $('registerAll'), refresh: $('refresh'), status: $('status'),
-    concurrency: $('concurrency'), concurrencyValue: $('concurrencyValue'), authorityValue: $('authorityValue'),
+    generation: $('generation'), refresh: $('refresh'), status: $('status'), roleContracts: $('roleContracts'),
+    roleTargets: $('roleTargets'), topologyActual: $('topologyActual'), topologyTotal: $('topologyTotal'), reconcileFleet: $('reconcileFleet'),
+    concurrency: $('concurrency'), concurrencyValue: $('concurrencyValue'), turnLimit: $('turnLimit'), turnLimitValue: $('turnLimitValue'), authorityValue: $('authorityValue'),
     invariants: $('invariants'), exceptions: $('exceptions'), exceptionCount: $('exceptionCount'),
     taskTitle: $('taskTitle'), taskRole: $('taskRole'), taskPriority: $('taskPriority'), taskPrompt: $('taskPrompt'), taskDeps: $('taskDeps'), createTask: $('createTask'),
     tasks: $('tasks'), taskCount: $('taskCount'), workers: $('workers'), workerCount: $('workerCount'),
@@ -53,6 +54,11 @@
     const policy = source.policy && typeof source.policy === 'object' ? source.policy : {};
     const workers = source.workers && typeof source.workers === 'object' && !Array.isArray(source.workers) ? source.workers : {};
     const tasks = source.tasks && typeof source.tasks === 'object' && !Array.isArray(source.tasks) ? source.tasks : {};
+    const roleCatalog = Array.isArray(source.roleCatalog) ? source.roleCatalog.filter((role) => role && typeof role.id === 'string') : [];
+    const topology = source.topology && typeof source.topology === 'object' ? source.topology : {};
+    const desiredRoleCounts = topology.desiredRoleCounts && typeof topology.desiredRoleCounts === 'object'
+      ? topology.desiredRoleCounts
+      : {};
     return {
       ...source,
       generation: Number.isFinite(Number(source.generation)) ? Number(source.generation) : 0,
@@ -62,9 +68,12 @@
         paused: policy.paused === true,
         authorityEnabled: policy.authorityEnabled !== false,
         maxConcurrency: Math.max(1, Math.min(64, Number(policy.maxConcurrency) || 8)),
+        maxTurnsPerChat: Math.max(1, Math.min(50, Math.trunc(Number(policy.maxTurnsPerChat) || 10))),
         activeWorkerWindows: policy.activeWorkerWindows !== false,
         warmIdleMs: Math.max(10000, Math.min(300000, Number(policy.warmIdleMs) || 60000)),
       },
+      roleCatalog,
+      topology: { desiredRoleCounts },
       workers,
       tasks,
       messages: Array.isArray(source.messages) ? source.messages.filter((item) => item && typeof item === 'object') : [],
@@ -97,7 +106,7 @@
   function workerTargetLabel(worker) {
     const url = workerUrlInfo(worker);
     const title = String(worker?.title || '').trim();
-    const role = String(worker?.role || 'generalist').trim() || 'generalist';
+    const role = String(worker?.role || 'coordinator').trim() || 'coordinator';
     const genericTitle = !title || /^chatgpt(?:\s*[-—].*)?$/i.test(title);
     const context = genericTitle ? url.short : `${compact(title, 36)} · ${url.short}`;
     return `${worker.id} · ${role} · ${context}`;
@@ -162,6 +171,7 @@
 
   function taskRunnable(task) {
     if (!snapshot || task.status !== 'pending') return false;
+    if (String(task.workflowBlockReason || '').trim()) return false;
     return (task.dependencies || []).every((id) => snapshot.tasks?.[id]?.status === 'done');
   }
 
@@ -174,9 +184,24 @@
     return direction === 'oldest' ? sorted : sorted.reverse();
   }
 
+  function workerRouteLabel(workerId) {
+    const id = String(workerId || '').trim();
+    if (!id) return 'unknown';
+    const worker = snapshot?.workers?.[id];
+    if (!worker) return id;
+    const role = String(worker.role || 'coordinator').trim() || 'coordinator';
+    return `${id} (${role})`;
+  }
+
   function messageRoute(message) {
-    const from = message.fromWorkerId || message.from || 'operator';
-    const to = message.toWorkerId === 'operator' ? 'you' : (message.toWorkerId || 'unknown');
+    const from = message.fromWorkerId
+      ? workerRouteLabel(message.fromWorkerId)
+      : (message.from || 'operator');
+    const to = message.toWorkerId === 'operator'
+      ? 'you'
+      : message.toWorkerId
+        ? workerRouteLabel(message.toWorkerId)
+        : 'unknown';
     return `${from} → ${to}`;
   }
 
@@ -196,9 +221,64 @@
     </div>`;
   }
 
+  function roleCatalog() {
+    return Array.isArray(snapshot?.roleCatalog) && snapshot.roleCatalog.length
+      ? snapshot.roleCatalog
+      : [{ id: 'coordinator', label: 'Coordinator', defaultCount: 1 }];
+  }
+
+  function roleOptions(selected = '') {
+    return roleCatalog().map((role) => {
+      const id = String(role.id || 'coordinator');
+      const label = String(role.label || id);
+      return `<option value="${escapeHtml(id)}" ${selected === id ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+    }).join('');
+  }
+
+  function renderTopology() {
+    const catalog = roleCatalog();
+    const counts = Object.fromEntries(catalog.map((role) => [role.id, 0]));
+    const staleCounts = Object.fromEntries(catalog.map((role) => [role.id, 0]));
+    for (const worker of workers().filter((worker) => worker.enabled !== false)) {
+      const role = String(worker.role || 'coordinator');
+      if (worker.lifecycle === 'stale' || !Number.isInteger(worker.tabId)) staleCounts[role] = Number(staleCounts[role] || 0) + 1;
+      else counts[role] = Number(counts[role] || 0) + 1;
+    }
+    const desired = snapshot?.topology?.desiredRoleCounts || {};
+    const desiredTotal = catalog.reduce((sum, role) => sum + Math.max(0, Number(desired[role.id] ?? role.defaultCount ?? 0)), 0);
+    els.topologyActual.textContent = String(Object.values(counts).reduce((sum, count) => sum + count, 0));
+    els.topologyTotal.textContent = String(desiredTotal);
+    els.roleTargets.innerHTML = catalog.map((role) => {
+      const target = Math.max(0, Number(desired[role.id] ?? role.defaultCount ?? 0));
+      const current = Number(counts[role.id] || 0);
+      const stale = Number(staleCounts[role.id] || 0);
+      return `<div class="role-target" data-role="${escapeHtml(role.id)}">
+        <div><div class="name">${escapeHtml(role.label || role.id)}</div><div class="small">${current} live${stale ? ` · ${stale} stale` : ''}</div></div>
+        <div class="role-count">${current} / ${target}</div>
+        <div class="stepper">
+          <button type="button" data-action="role-minus" data-role="${escapeHtml(role.id)}" aria-label="Reduce ${escapeHtml(role.label || role.id)} target">−</button>
+          <button type="button" data-action="role-plus" data-role="${escapeHtml(role.id)}" aria-label="Increase ${escapeHtml(role.label || role.id)} target">+</button>
+        </div>
+      </div>`;
+    }).join('');
+
+    const currentTaskRole = els.taskRole.value;
+    els.taskRole.innerHTML = roleOptions(currentTaskRole);
+    if ([...els.taskRole.options].some((option) => option.value === currentTaskRole)) els.taskRole.value = currentTaskRole;
+  }
+
+  function renderRoleContracts() {
+    if (!els.roleContracts) return;
+    els.roleContracts.innerHTML = roleCatalog().map((role) => `<div class="policy">
+      <div class="policy-top"><span class="name">${escapeHtml(role.label || role.id)}</span><span class="value">${escapeHtml(role.authorityScope || '')}</span></div>
+      <div class="small">${escapeHtml(role.purpose || '')}</div>
+    </div>`).join('');
+  }
+
   function renderWorkers() {
     const list = workers().sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
-    els.workerCount.textContent = `${list.length} registered`;
+    const liveCount = list.filter((worker) => worker.enabled !== false && worker.lifecycle !== 'stale' && Number.isInteger(worker.tabId)).length;
+    els.workerCount.textContent = `${list.length} slots · ${liveCount} live`;
     if (!list.length) {
       els.workers.innerHTML = '<div class="empty">No workers registered. Open ChatGPT tabs, then register them.</div>';
       return;
@@ -208,8 +288,9 @@
       const lifecycle = safeStatus(worker.lifecycle, worker.currentAssignmentId ? 'running' : 'idle');
       const warmIdle = lifecycle === 'warm-idle';
       const activating = lifecycle === 'activating';
-      const stale = age === null || age > HEARTBEAT_STALE_SECONDS;
-      const status = warmIdle ? 'warm' : activating ? 'waking' : stale ? 'offline' : safeStatus(worker.status, 'idle');
+      const rotating = lifecycle === 'rotating';
+      const stale = worker.lifecycle === 'stale' || !Number.isInteger(worker.tabId) || age === null || age > HEARTBEAT_STALE_SECONDS;
+      const status = warmIdle ? 'warm' : rotating ? 'rotating' : activating ? 'waking' : stale ? 'offline' : safeStatus(worker.status, 'idle');
       const statusClass = status === 'running' || status === 'waking' ? 'running' : status === 'blocked' || status === 'offline' ? 'blocked' : 'pending';
       const assignment = worker.currentTaskId || worker.currentMessageId || 'idle';
       const urlInfo = workerUrlInfo(worker);
@@ -218,12 +299,13 @@
         : '';
       return `<div class="worker" data-worker="${escapeHtml(worker.id)}">
         <div class="topline"><div><div class="name tab-name" title="${escapeHtml(workerTabTitle(worker))}">${escapeHtml(workerTabTitle(worker))}</div><div class="role">${escapeHtml(worker.id)} · ${escapeHtml(worker.role)}</div></div><span class="pill ${statusClass}">${escapeHtml(status.toUpperCase())}</span></div>
-        <div class="small" style="margin-top:6px">${escapeHtml(assignment)} · ${escapeHtml(lifecycle)} · heartbeat ${age === null ? 'never' : `${age}s ago`}</div>
+        <div class="small" style="margin-top:6px">${escapeHtml(assignment)} · ${escapeHtml(lifecycle)} · ${worker.lifecycle === 'stale' ? 'stale / unbound' : `tab ${worker.tabId ?? '—'} · window ${worker.windowId ?? '—'} · heartbeat ${age === null ? 'never' : `${age}s ago`}`}</div>
+        <div class="small">Chat turns · ${Math.max(0, Number(worker.chatTurnCount || 0))} / ${snapshot.policy.maxTurnsPerChat}${worker.chatRotationPending ? ' · rotation pending' : ''}</div>
         <div class="small" title="${escapeHtml(urlInfo.full)}">URL · ${escapeHtml(urlInfo.short)}</div>
         <div class="caps">${escapeHtml((worker.capabilities || []).join(' · '))}</div>
         <div class="worker-actions">
           <select class="mini" data-action="role-worker" data-worker="${escapeHtml(worker.id)}">
-            ${['generalist','research','implementation','review','test'].map((role) => `<option value="${role}" ${worker.role === role ? 'selected' : ''}>${role}</option>`).join('')}
+            ${roleOptions(worker.role)}
           </select>
           ${cancelDispatch}
           <button class="mini" data-action="unregister-worker" data-worker="${escapeHtml(worker.id)}">Unregister</button>
@@ -243,8 +325,9 @@
       const lifecycle = safeStatus(worker.lifecycle, worker.currentAssignmentId ? "running" : "idle");
       const warmIdle = lifecycle === "warm-idle";
       const activating = lifecycle === "activating";
-      const stale = age === null || age > HEARTBEAT_STALE_SECONDS;
-      const status = warmIdle ? "warm" : activating ? "waking" : stale ? "offline" : safeStatus(worker.status, "idle");
+      const rotating = lifecycle === "rotating";
+      const stale = worker.lifecycle === 'stale' || !Number.isInteger(worker.tabId) || age === null || age > HEARTBEAT_STALE_SECONDS;
+      const status = warmIdle ? "warm" : rotating ? "rotating" : activating ? "waking" : stale ? "offline" : safeStatus(worker.status, "idle");
       const statusClass = status === "running" || status === "waking" ? "running" : status === "blocked" || status === "offline" ? "blocked" : "pending";
       const pill = root.querySelector(".topline .pill");
       if (pill) {
@@ -275,7 +358,7 @@
       const retry = ['blocked', 'cancelled'].includes(taskStatus) ? `<button class="mini" data-action="retry-task" data-task="${escapeHtml(task.id)}">Retry</button>` : '';
       return `<div class="task">
         <div class="topline"><div><div class="name">${escapeHtml(task.id)} · ${escapeHtml(task.title)}</div><div class="small">${escapeHtml(task.role)} · priority ${task.priority || 0} · ${escapeHtml(deps)} · attempts ${task.attempts || 0}</div></div><span class="pill ${stateClass}">${escapeHtml(stateLabel)}</span></div>
-        <div class="small" style="margin-top:6px">${task.assignedWorkerId ? `owner ${escapeHtml(task.assignedWorkerId)}` : 'unowned'}${task.statusNote ? ` · ${escapeHtml(task.statusNote)}` : ''}</div>
+        <div class="small" style="margin-top:6px">${task.assignedWorkerId ? `owner ${escapeHtml(task.assignedWorkerId)}` : 'unowned'}${task.statusNote ? ` · ${escapeHtml(task.statusNote)}` : ''}${task.workflowBlockReason ? ` · gate: ${escapeHtml(task.workflowBlockReason)}` : ''}</div>
         ${result}${retry ? `<div style="margin-top:7px">${retry}</div>` : ''}
       </div>`;
     }).join('');
@@ -304,7 +387,9 @@
       : '<div class="empty">No semantic traffic yet.</div>';
 
     const current = els.messageTarget.value;
-    els.messageTarget.innerHTML = '<option value="">Select worker by tab</option>' + workers().filter((w) => w.enabled).map((w) => `<option value="${escapeHtml(w.id)}" title="${escapeHtml(w.url || '')}">${escapeHtml(workerTargetLabel(w))}</option>`).join('');
+    els.messageTarget.innerHTML = '<option value="">Select live worker</option>' + workers()
+      .filter((w) => w.enabled && w.lifecycle !== 'stale' && Number.isInteger(w.tabId))
+      .map((w) => `<option value="${escapeHtml(w.id)}" title="${escapeHtml(w.url || '')}">${escapeHtml(workerTargetLabel(w))}</option>`).join('');
     if ([...els.messageTarget.options].some((option) => option.value === current)) els.messageTarget.value = current;
   }
 
@@ -322,18 +407,19 @@
 
   function computeInvariants() {
     const list = workers();
-    const running = list.filter((w) => w.currentAssignmentId);
-    const tabIds = list.map((w) => w.tabId);
+    const liveList = list.filter((w) => w.enabled !== false && w.lifecycle !== 'stale' && Number.isInteger(w.tabId));
+    const running = liveList.filter((w) => w.currentAssignmentId);
+    const tabIds = liveList.map((w) => w.tabId);
     const assignmentIds = running.map((w) => w.currentAssignmentId);
     const uniqueTabs = new Set(tabIds).size === tabIds.length;
     const uniqueAssignments = new Set(assignmentIds).size === assignmentIds.length;
     const withinConcurrency = running.length <= Number(snapshot.policy.maxConcurrency || 1);
-    const taskOwners = tasks().filter((t) => t.status === 'running').every((task) => list.filter((w) => w.currentTaskId === task.id).length === 1);
+    const taskOwners = tasks().filter((t) => t.status === 'running').every((task) => liveList.filter((w) => w.currentTaskId === task.id).length === 1);
     const ownedWorkersActivated = running.every((worker) => ['activating', 'running'].includes(worker.lifecycle));
-    const enabledWorkers = list.filter((worker) => worker.enabled !== false);
+    const enabledWorkers = liveList;
     const persistentWindowIds = enabledWorkers.filter((worker) => Number.isInteger(worker.windowId)).map((worker) => worker.windowId);
     const persistentWindows = !snapshot.policy.activeWorkerWindows || (persistentWindowIds.length === enabledWorkers.length && new Set(persistentWindowIds).size === persistentWindowIds.length);
-    const noSleepState = enabledWorkers.every((worker) => !Number.isInteger(worker.sleepTabId) && !['sleeping', 'parking'].includes(worker.lifecycle));
+    const noSleepState = list.every((worker) => !Number.isInteger(worker.sleepTabId) && !['sleeping', 'parking'].includes(worker.lifecycle));
     return [
       ['Authority', snapshot.policy.authorityEnabled, snapshot.policy.authorityEnabled ? 'dispatch permitted' : 'revoked'],
       ['Unique tab ownership', uniqueTabs, `${new Set(tabIds).size}/${tabIds.length} unique`],
@@ -353,14 +439,16 @@
     const exceptions = [];
     for (const worker of workers()) {
       const age = worker.heartbeatAt ? Math.round((snapshot.serverNow - worker.heartbeatAt) / 1000) : Infinity;
-      if (age > HEARTBEAT_STALE_SECONDS) exceptions.push(`${worker.id} heartbeat stale (${Number.isFinite(age) ? `${age}s` : 'never'})`);
+      if (worker.lifecycle === 'stale' || !Number.isInteger(worker.tabId)) exceptions.push(`${worker.id} is stale / unbound`);
+      else if (age > HEARTBEAT_STALE_SECONDS) exceptions.push(`${worker.id} heartbeat stale (${Number.isFinite(age) ? `${age}s` : 'never'})`);
       if (worker.status === 'blocked') {
         exceptions.push(worker.id + ' is blocked' + (worker.lastDispatchError ? ': ' + worker.lastDispatchError : ''));
       }
     }
     for (const task of tasks()) {
       if (task.status === 'blocked') exceptions.push(`${task.id} is blocked${task.statusNote ? `: ${task.statusNote}` : ''}`);
-      if (task.status === 'pending' && !taskRunnable(task) && (task.dependencies || []).some((id) => snapshot.tasks?.[id]?.status === 'blocked')) exceptions.push(`${task.id} waits on a blocked dependency`);
+      if (task.status === 'pending' && task.workflowBlockReason) exceptions.push(`${task.id} workflow blocked: ${task.workflowBlockReason}`);
+      else if (task.status === 'pending' && !taskRunnable(task) && (task.dependencies || []).some((id) => snapshot.tasks?.[id]?.status === 'blocked')) exceptions.push(`${task.id} waits on a blocked dependency`);
     }
     els.exceptionCount.textContent = String(exceptions.length);
     els.exceptions.innerHTML = exceptions.length ? exceptions.map((text) => `<div class="exception"><strong>Attention</strong><div class="small">${escapeHtml(text)}</div></div>`).join('') : '<div class="empty">No current exceptions.</div>';
@@ -376,16 +464,21 @@
     els.healthText.textContent = healthy ? (snapshot.policy.paused ? 'Healthy · paused' : 'Healthy') : (snapshot.policy.authorityEnabled ? 'Attention required' : 'Authority revoked');
     els.healthDot.style.background = healthy ? 'var(--green)' : snapshot.policy.authorityEnabled ? 'var(--amber)' : 'var(--red)';
     els.goalInput.value = document.activeElement === els.goalInput ? els.goalInput.value : (snapshot.goal || '');
-    els.workerMetric.textContent = `${active} / ${list.length}`;
+    const live = list.filter((worker) => worker.enabled !== false && worker.lifecycle !== 'stale' && Number.isInteger(worker.tabId)).length;
+    els.workerMetric.textContent = `${active} / ${live}`;
     els.taskMetric.textContent = String(runnable);
     els.generation.textContent = `gen ${snapshot.generation}`;
     els.concurrency.value = String(snapshot.policy.maxConcurrency || 8);
     els.concurrencyValue.textContent = String(snapshot.policy.maxConcurrency || 8);
+    els.turnLimit.value = String(snapshot.policy.maxTurnsPerChat || 10);
+    els.turnLimitValue.textContent = String(snapshot.policy.maxTurnsPerChat || 10);
     els.authorityValue.textContent = snapshot.policy.authorityEnabled ? 'ON' : 'OFF';
     els.authorityValue.style.color = snapshot.policy.authorityEnabled ? 'var(--green)' : 'var(--red)';
     els.pauseAll.textContent = snapshot.policy.paused ? 'Resume dispatch' : 'Pause dispatch';
     els.killAll.textContent = snapshot.policy.authorityEnabled ? 'Kill authority' : 'Restore authority';
 
+    renderTopology();
+    renderRoleContracts();
     renderWorkers();
     renderTasks();
     renderMessages();
@@ -416,12 +509,44 @@
     }
   });
 
+  els.roleTargets.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-action][data-role]');
+    if (!button || !snapshot) return;
+    const role = button.dataset.role;
+    const current = Math.max(0, Number(snapshot.topology?.desiredRoleCounts?.[role] || 0));
+    const next = button.dataset.action === 'role-plus' ? current + 1 : Math.max(0, current - 1);
+    button.disabled = true;
+    send('fleet:set-topology-role-count', { role, count: next }).then((response) => {
+      snapshot = normalizeSnapshot(response.snapshot);
+      render();
+      setStatus(`${role} target → ${next}`);
+    }).catch((error) => setStatus(String(error), true)).finally(() => { button.disabled = false; });
+  });
+
+  els.reconcileFleet.addEventListener('click', () => {
+    els.reconcileFleet.disabled = true;
+    setStatus('Reconciling fleet windows…');
+    send('fleet:reconcile-topology').then((response) => {
+      snapshot = normalizeSnapshot(response.snapshot);
+      render();
+      const warnings = Array.isArray(response.errors) ? response.errors.length : 0;
+      const deferred = Number(response.deferredRemovals || 0);
+      const detail = `Created ${response.created?.length || 0}; removed ${response.removed?.length || 0}`
+        + (deferred ? `; ${deferred} reduction(s) deferred` : '')
+        + (warnings ? `; ${warnings} warning(s)` : '');
+      setStatus(detail, warnings > 0);
+    }).catch((error) => setStatus(String(error), true)).finally(() => {
+      els.reconcileFleet.disabled = false;
+    });
+  });
+
   els.refresh.addEventListener('click', () => refresh().then(() => setStatus('Refreshed')).catch((error) => setStatus(String(error), true)));
-  els.registerAll.addEventListener('click', () => send('fleet:register-all-tabs').then((response) => { snapshot = normalizeSnapshot(response.snapshot); render(); setStatus('Registered supported ChatGPT tabs'); }).catch((error) => setStatus(String(error), true)));
   els.saveGoal.addEventListener('click', () => send('fleet:set-goal', { goal: els.goalInput.value }).then((response) => { snapshot = normalizeSnapshot(response.snapshot); render(); setStatus('Goal saved'); }).catch((error) => setStatus(String(error), true)));
 
   els.concurrency.addEventListener('input', () => { els.concurrencyValue.textContent = els.concurrency.value; });
   els.concurrency.addEventListener('change', () => send('fleet:update-policy', { patch: { maxConcurrency: Number(els.concurrency.value) } }).then((response) => { snapshot = normalizeSnapshot(response.snapshot); render(); setStatus('Concurrency updated'); }).catch((error) => setStatus(String(error), true)));
+  els.turnLimit.addEventListener('input', () => { els.turnLimitValue.textContent = String(els.turnLimit.value); });
+  els.turnLimit.addEventListener('change', () => send('fleet:update-policy', { patch: { maxTurnsPerChat: Number(els.turnLimit.value) } }).then((response) => { snapshot = normalizeSnapshot(response.snapshot); render(); setStatus('Turns-per-chat limit updated'); }).catch((error) => setStatus(String(error), true)));
   els.pauseAll.addEventListener('click', () => {
     if (!snapshot) return;
     send('fleet:update-policy', { patch: { paused: !snapshot.policy.paused } }).then((response) => {

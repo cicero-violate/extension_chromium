@@ -21,7 +21,7 @@ test('fleet worker keeps legacy assistant-role selector as fallback', () => {
 test('new assistant turn identity participates in the response fingerprint', () => {
   assert.match(source, /const assistantTurnNodeIds = new WeakMap\(\)/);
   assert.match(source, /fingerprint: assistantTurnNodeId\(node\) \+ ':' \+ fingerprint\(text\)/);
-  assert.match(source, /baselineFingerprint: baseline\.fingerprint/);
+  assert.match(source, /active\.baselineFingerprint = sent\.baseline\.fingerprint/);
 });
 
 test('DOM activity forces a throttled rescan but quiet time advances only on assistant change', () => {

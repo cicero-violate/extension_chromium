@@ -34,6 +34,15 @@ test('semantic traffic excludes messages involving the operator', () => {
 
 
 test('worker selector identifies each worker role', () => {
-  assert.match(js, /const role = String\(worker\?\.role \|\| 'generalist'\)/);
+  assert.match(js, /const role = String\(worker\?\.role \|\| 'coordinator'\)/);
   assert.match(js, /return `\$\{worker\.id\} · \$\{role\} · \$\{context\}`/);
+});
+
+
+test('message routes show worker roles next to worker IDs', () => {
+  assert.match(js, /function workerRouteLabel\(workerId\)/);
+  assert.match(js, /const worker = snapshot\?\.workers\?\.\[id\]/);
+  assert.match(js, /return `\$\{id\} \(\$\{role\}\)`/);
+  assert.match(js, /workerRouteLabel\(message\.fromWorkerId\)/);
+  assert.match(js, /workerRouteLabel\(message\.toWorkerId\)/);
 });

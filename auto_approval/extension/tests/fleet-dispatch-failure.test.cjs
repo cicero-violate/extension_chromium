@@ -15,7 +15,7 @@ test('dispatch transport failure blocks the worker instead of tight-loop requeue
 });
 
 test('public snapshot preserves blocked status when no assignment is active', () => {
-  assert.match(background, /worker\.status === 'blocked' \? 'blocked'/);
+  assert.match(background, /\['blocked', 'stale', 'offline'\]\.includes\(worker\.status\) \? worker\.status/);
 });
 
 test('journal and exceptions expose dispatch errors', () => {

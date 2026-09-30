@@ -14,6 +14,7 @@ const WORKER_BRIDGE_RETRY_MS = 250;
 const FLEET_PAGE_BUSY_RECHECK_MS = 5000;
 const MAX_AUTO_RECOVERY_ATTEMPTS = 1;
 const MAX_PROTOCOL_REPAIR_ATTEMPTS = 1;
+const MAX_TURNS_PER_CHAT = 10;
 const AUTO_RECOVERY_REASON_PREFIX = 'auto-recovery: ';
 const LEGACY_SLEEP_PAGE_URL = chrome.runtime.getURL('sleep.html');
 const WARM_IDLE_ALARM_PREFIX = 'model-fleet:warm-idle:';
@@ -41,9 +42,26 @@ const DEFAULT_POLICY = Object.freeze({
   maxConcurrency: 8,
   activeWorkerWindows: true,
   warmIdleMs: DEFAULT_WARM_IDLE_MS,
+  maxTurnsPerChat: MAX_TURNS_PER_CHAT,
 });
 
-const DEFAULT_TOPOLOGY = Object.freeze({});
+const ROLE_CATALOG = Object.freeze([
+  Object.freeze({ id: 'coordinator', label: 'Coordinator', defaultCount: 1, purpose: 'Run the fleet control loop: decompose goals, route work, observe results, replan the DAG, and escalate unresolved decisions.', claimTypes: ['decomposition', 'routing', 'observation', 'replan', 'escalation', 'status'], authorityScope: 'Workflow orchestration and child-task creation only; no specialist execution, technical acceptance, or canonical integration authority.', prohibitedActions: ['implement specialist work', 'self-certify work', 'declare implementation verified', 'perform canonical integration or release'], allowedHandoffs: ['coordinator', 'research', 'architect', 'implementation', 'review', 'test', 'integrator'], requiresIndependentVerification: false }),
+  Object.freeze({ id: 'research', label: 'Research', defaultCount: 2, purpose: 'Produce evidence, hypotheses, and source-grounded findings.', claimTypes: ['evidence', 'hypothesis', 'research'], authorityScope: 'Evidence and hypotheses only.', prohibitedActions: ['declare integration accepted', 'approve implementation'], allowedHandoffs: ['architect', 'implementation', 'review', 'test', 'coordinator'], requiresIndependentVerification: false }),
+  Object.freeze({ id: 'architect', label: 'Architect', defaultCount: 1, purpose: 'Define design, invariants, interfaces, and migration plans.', claimTypes: ['design', 'invariant', 'migration-plan'], authorityScope: 'Architecture and migration decisions.', prohibitedActions: ['self-verify implementation', 'declare implementation correct'], allowedHandoffs: ['implementation', 'review', 'test', 'coordinator'], requiresIndependentVerification: true }),
+  Object.freeze({ id: 'implementation', label: 'Implementation', defaultCount: 3, purpose: 'Develop an implementation candidate against the approved design.', claimTypes: ['implementation', 'patch', 'candidate'], authorityScope: 'Implementation changes and candidate results.', prohibitedActions: ['self-approve', 'integrate or release'], allowedHandoffs: ['review', 'test', 'coordinator'], requiresIndependentVerification: true }),
+  Object.freeze({ id: 'review', label: 'Review', defaultCount: 2, purpose: 'Independently verify correctness, architecture, and invariants.', claimTypes: ['verification', 'correctness', 'architecture-review'], authorityScope: 'Independent correctness and architecture verification.', prohibitedActions: ['verify own implementation', 'integrate or release'], allowedHandoffs: ['test', 'integrator', 'implementation', 'coordinator'], requiresIndependentVerification: true }),
+  Object.freeze({ id: 'test', label: 'Test', defaultCount: 2, purpose: 'Falsify claims with adversarial, regression, and performance evidence.', claimTypes: ['test-evidence', 'falsification', 'performance'], authorityScope: 'Independent test and falsification evidence.', prohibitedActions: ['validate own implementation', 'integrate or release'], allowedHandoffs: ['review', 'integrator', 'implementation', 'coordinator'], requiresIndependentVerification: true }),
+  Object.freeze({ id: 'integrator', label: 'Integrator', defaultCount: 1, purpose: 'Turn verified and tested dependencies into accepted release state.', claimTypes: ['integration', 'release', 'accepted-state'], authorityScope: 'Canonical integration and release authority.', prohibitedActions: ['author the implementation it integrates', 'accept unverified dependencies'], allowedHandoffs: ['coordinator', 'review', 'test'], requiresIndependentVerification: true }),
+]);
+const ROLE_IDS = new Set(ROLE_CATALOG.map((role) => role.id));
+const MAX_ROLE_COUNT = 16;
+const DEFAULT_ROLE_COUNTS = Object.freeze(Object.fromEntries(
+  ROLE_CATALOG.map((role) => [role.id, role.defaultCount]),
+));
+const DEFAULT_TOPOLOGY = Object.freeze({
+  desiredRoleCounts: DEFAULT_ROLE_COUNTS,
+});
 
 let stateQueue = Promise.resolve();
 let scheduling = false;
@@ -166,6 +184,26 @@ async function restartRepeatCycle(tabId) {
   return { restarted: true, state: next, mode: 'new_chat', tabId };
 }
 
+function normalizeTopology(value = {}) {
+  const source = value && typeof value === 'object' ? value : {};
+  const rawCounts = source.desiredRoleCounts && typeof source.desiredRoleCounts === 'object'
+    ? source.desiredRoleCounts
+    : {};
+  const migratedCounts = { ...rawCounts };
+  if (migratedCounts.coordinator === undefined && migratedCounts.generalist !== undefined) {
+    migratedCounts.coordinator = migratedCounts.generalist;
+  }
+  const desiredRoleCounts = {};
+  for (const role of ROLE_CATALOG) {
+    const fallback = role.defaultCount;
+    desiredRoleCounts[role.id] = Math.max(
+      0,
+      Math.min(MAX_ROLE_COUNT, Math.trunc(Number(migratedCounts[role.id] ?? fallback) || 0)),
+    );
+  }
+  return { desiredRoleCounts };
+}
+
 function freshFleetState() {
   return {
     version: 1,
@@ -179,6 +217,7 @@ function freshFleetState() {
     journal: [],
     nextTask: 1,
     nextMessage: 1,
+    nextWorkerSlot: 1,
     createdAt: now(),
     updatedAt: now(),
   };
@@ -191,22 +230,62 @@ function normalizeFleetState(value) {
     key,
     Object.prototype.hasOwnProperty.call(storedPolicy, key) ? storedPolicy[key] : DEFAULT_POLICY[key],
   ]));
+  const sourceWorkers = state.workers && typeof state.workers === 'object' ? state.workers : {};
   const workers = {};
-  for (const [id, rawWorker] of Object.entries(state.workers && typeof state.workers === 'object' ? state.workers : {})) {
+  const legacyWorkerMap = new Map();
+  const durableIds = Object.keys(sourceWorkers).filter((id) => /^W-S\d{4,}$/.test(id));
+  let nextWorkerSlot = Math.max(1, Math.trunc(Number(state.nextWorkerSlot) || 1));
+  for (const id of durableIds) {
+    nextWorkerSlot = Math.max(nextWorkerSlot, Number(id.slice(4)) + 1);
+  }
+  const allocateNormalizedSlot = () => `W-S${String(nextWorkerSlot++).padStart(4, '0')}`;
+  const workerEntries = Object.entries(sourceWorkers).sort(([a], [b]) => {
+    const aDurable = /^W-S\d{4,}$/.test(a);
+    const bDurable = /^W-S\d{4,}$/.test(b);
+    if (aDurable !== bDurable) return aDurable ? -1 : 1;
+    return a.localeCompare(b, undefined, { numeric: true });
+  });
+  for (const [oldId, rawWorker] of workerEntries) {
     const worker = { ...rawWorker };
+    const id = /^W-S\d{4,}$/.test(oldId) ? oldId : allocateNormalizedSlot();
+    if (id !== oldId) {
+      worker.legacyWorkerId = worker.legacyWorkerId || oldId;
+      legacyWorkerMap.set(oldId, id);
+    }
+    worker.id = id;
+    worker.role = canonicalRole(worker.role);
+    worker.topologyManaged = worker.topologyManaged === true;
+    worker.chatTurnCount = Math.max(0, Math.trunc(Number(worker.chatTurnCount || 0)));
+    worker.chatRotationPending = worker.chatRotationPending === true
+      || worker.chatTurnCount >= boundedMaxTurnsPerChat(policy.maxTurnsPerChat);
+    worker.lastCountedAssignmentId = String(worker.lastCountedAssignmentId || '');
     if (['sleeping', 'parking'].includes(worker.lifecycle)) worker.lifecycle = 'idle';
     delete worker.sleepTabId;
     delete worker.sleepingSince;
     workers[id] = worker;
   }
+  const rewriteWorkerRef = (value) => legacyWorkerMap.get(value) || value;
+  const tasks = state.tasks && typeof state.tasks === 'object' ? state.tasks : {};
+  for (const task of Object.values(tasks)) {
+    if (task && task.assignedWorkerId) task.assignedWorkerId = rewriteWorkerRef(task.assignedWorkerId);
+    if (task && task.completedByWorkerId) task.completedByWorkerId = rewriteWorkerRef(task.completedByWorkerId);
+  }
+  const messages = Array.isArray(state.messages) ? state.messages.slice(-MAX_MESSAGES) : [];
+  for (const message of messages) {
+    if (message.fromWorkerId) message.fromWorkerId = rewriteWorkerRef(message.fromWorkerId);
+    if (message.toWorkerId && message.toWorkerId !== 'operator' && message.toWorkerId !== 'scheduler') {
+      message.toWorkerId = rewriteWorkerRef(message.toWorkerId);
+    }
+  }
   return {
     ...freshFleetState(),
     ...state,
     policy,
-    topology: {},
+    topology: normalizeTopology(state.topology),
     workers,
-    tasks: state.tasks && typeof state.tasks === 'object' ? state.tasks : {},
-    messages: Array.isArray(state.messages) ? state.messages.slice(-MAX_MESSAGES) : [],
+    nextWorkerSlot,
+    tasks,
+    messages,
     journal: Array.isArray(state.journal) ? state.journal.slice(-MAX_JOURNAL) : [],
   };
 }
@@ -244,13 +323,20 @@ function publicSnapshot(state) {
       windowId: Number.isInteger(live?.windowId) ? live.windowId : worker.windowId,
       status: worker.currentAssignmentId
         ? worker.status
-        : (worker.status === 'blocked' ? 'blocked' : (busy ? "waiting" : "idle")),
+        : (['blocked', 'stale', 'offline'].includes(worker.status) ? worker.status : (busy ? "waiting" : "idle")),
     };
   }
   return {
     ...state,
+    roleCatalog: ROLE_CATALOG.map((role) => ({ ...role })),
     workers,
-    tasks: { ...state.tasks },
+    tasks: Object.fromEntries(Object.entries(state.tasks).map(([taskId, task]) => [
+      taskId,
+      {
+        ...task,
+        workflowBlockReason: task.status === 'pending' ? taskBlockReason(state, task) : '',
+      },
+    ])),
     messages: state.messages.slice(),
     journal: state.journal.slice(),
     serverNow: now(),
@@ -287,13 +373,49 @@ function mutateFleet(mutator) {
   return operation;
 }
 
-function workerIdForTab(tabId) {
-  return `W-${tabId}`;
+function workerForTab(state, tabId) {
+  if (!Number.isInteger(tabId)) return null;
+  return Object.values(state.workers || {}).find((worker) => Number(worker.tabId) === tabId) || null;
+}
+
+function workerIdForTabInState(state, tabId) {
+  return workerForTab(state, tabId)?.id || null;
+}
+
+function allocateWorkerSlot(state) {
+  let counter = Math.max(1, Math.trunc(Number(state.nextWorkerSlot) || 1));
+  let id;
+  do { id = `W-S${String(counter++).padStart(4, '0')}`; } while (state.workers[id]);
+  state.nextWorkerSlot = counter;
+  return id;
 }
 
 function normalizeRole(role) {
   const value = String(role || '').trim().toLowerCase();
-  return value || 'generalist';
+  if (value === 'generalist') return 'coordinator';
+  return value || 'coordinator';
+}
+
+function canonicalRole(role) {
+  const value = normalizeRole(role);
+  return ROLE_IDS.has(value) ? value : 'coordinator';
+}
+
+function roleContract(role) {
+  return ROLE_CATALOG.find((item) => item.id === canonicalRole(role)) || ROLE_CATALOG[0];
+}
+
+function roleContractPrompt(role, heading = 'Active role contract') {
+  const contract = roleContract(role);
+  return [
+    `${heading}: ${contract.label} (${contract.id})`,
+    `Purpose: ${contract.purpose}`,
+    `Authority scope: ${contract.authorityScope}`,
+    `Claim types: ${contract.claimTypes.join(', ')}`,
+    `Prohibited actions: ${contract.prohibitedActions.join('; ')}`,
+    `Allowed handoffs: ${contract.allowedHandoffs.join(', ')}`,
+    `Independent verification required: ${contract.requiresIndependentVerification ? 'yes' : 'no'}`,
+  ].join('\n');
 }
 
 function defaultCapabilities() {
@@ -514,6 +636,11 @@ function boundedWarmIdleMs(value) {
   return Math.max(10000, Math.min(300000, Number(value) || DEFAULT_WARM_IDLE_MS));
 }
 
+function boundedMaxTurnsPerChat(value) {
+  const parsed = Math.trunc(Number(value));
+  return Math.max(1, Math.min(50, Number.isFinite(parsed) && parsed > 0 ? parsed : MAX_TURNS_PER_CHAT));
+}
+
 function warmIdleAlarmName(workerId) {
   return `${WARM_IDLE_ALARM_PREFIX}${workerId}`;
 }
@@ -648,7 +775,6 @@ async function cleanupLegacySleepTabs(reason = 'sleep-tab migration') {
   }
 
   await mutateFleet((state) => {
-    state.topology = {};
     let normalized = 0;
     for (const worker of Object.values(state.workers)) {
       const hadLegacyState = Number.isInteger(worker.sleepTabId) || ['sleeping', 'parking'].includes(worker.lifecycle);
@@ -741,6 +867,96 @@ async function activateWorkerForDispatch(dispatch) {
   return ensureFleetBridgeAfterWake(dispatch.tabId);
 }
 
+async function rotateWorkerChat(workerId, reason = 'chat turn limit reached') {
+  liveHeartbeats.delete(workerId);
+  const claimed = await mutateFleet((state) => {
+    const worker = state.workers[workerId];
+    if (!worker
+      || !worker.enabled
+      || !worker.chatRotationPending
+      || worker.currentAssignmentId
+      || !Number.isInteger(worker.tabId)
+      || worker.lifecycle === 'rotating'
+      || worker.status === 'blocked') return null;
+    worker.lifecycle = 'rotating';
+    worker.status = 'waiting';
+    worker.busy = false;
+    worker.pageBusyUntil = now() + WORKER_WAKE_TIMEOUT_MS;
+    appendJournal(state, 'worker.chat_rotation_started', workerId + ' starting a fresh ChatGPT conversation', {
+      reason,
+      tabId: worker.tabId,
+      turns: worker.chatTurnCount,
+      limit: boundedMaxTurnsPerChat(state.policy.maxTurnsPerChat),
+    });
+    return { tabId: worker.tabId };
+  });
+  if (!claimed.result) return false;
+
+  const tabId = claimed.result.tabId;
+  try {
+    await clearWarmIdleAlarm(workerId);
+    await chrome.tabs.update(tabId, { url: 'https://chatgpt.com/' });
+    await waitForTabReady(tabId, 30000);
+    await ensureFleetBridgeAfterWake(tabId, 30000);
+    const tab = await chrome.tabs.get(tabId);
+    await mutateFleet((state) => {
+      const worker = state.workers[workerId];
+      if (!worker || worker.tabId !== tabId || worker.currentAssignmentId) return;
+      worker.chatTurnCount = 0;
+      worker.chatRotationPending = false;
+      worker.lastCountedAssignmentId = '';
+      worker.lastChatRotationAt = now();
+      worker.lastChatRotationError = '';
+      worker.lifecycle = 'idle';
+      worker.status = 'idle';
+      worker.busy = false;
+      worker.pageBusyUntil = 0;
+      worker.heartbeatAt = now();
+      worker.title = tab.title || worker.title;
+      worker.url = tab.url || worker.url;
+      worker.windowId = Number.isInteger(tab.windowId) ? tab.windowId : worker.windowId;
+      appendJournal(state, 'worker.chat_rotated', workerId + ' started a fresh ChatGPT conversation', {
+        reason,
+        tabId,
+      });
+    });
+    await updateBadge(tabId).catch(() => {});
+    schedule().catch(() => {});
+    return true;
+  } catch (error) {
+    await mutateFleet((state) => {
+      const worker = state.workers[workerId];
+      if (!worker || worker.tabId !== tabId) return;
+      worker.status = 'blocked';
+      worker.lifecycle = 'rotation-failed';
+      worker.busy = false;
+      worker.pageBusyUntil = 0;
+      worker.lastChatRotationError = String(error);
+      appendJournal(state, 'worker.chat_rotation_failed', workerId + ' could not start a fresh ChatGPT conversation', {
+        reason,
+        tabId,
+        error: String(error),
+      });
+    }).catch(() => {});
+    reconcileStaleWorkerBindings('chat rotation failed').catch(() => {});
+    throw error;
+  }
+}
+
+function startPendingChatRotations(state) {
+  for (const worker of Object.values(state.workers || {})) {
+    if (!worker.enabled
+      || !worker.chatRotationPending
+      || worker.currentAssignmentId
+      || !Number.isInteger(worker.tabId)
+      || worker.lifecycle === 'rotating'
+      || worker.status === 'blocked') continue;
+    rotateWorkerChat(worker.id).catch((error) => {
+      console.warn('[model-fleet] worker chat rotation failed', worker.id, error);
+    });
+  }
+}
+
 function reconcileBridgeRuntimeState(state, workerId, bridgeState = {}) {
   const worker = state.workers[workerId];
   if (!worker) return;
@@ -782,14 +998,99 @@ function reconcileBridgeRuntimeState(state, workerId, bridgeState = {}) {
   worker.heartbeatAt = now();
 }
 
+function releaseWorkerBinding(state, workerId, reason = 'worker binding lost') {
+  const worker = state.workers[workerId];
+  if (!worker) return false;
+  if (worker.currentTaskId) {
+    const task = state.tasks[worker.currentTaskId];
+    if (task?.status === 'running' && task.assignedWorkerId === workerId) {
+      task.status = 'pending';
+      task.assignedWorkerId = null;
+      task.assignmentId = null;
+      task.startedAt = 0;
+      task.statusNote = `${reason}; task requeued`;
+      appendJournal(state, 'task.requeued', `${task.id} requeued because ${workerId} became stale`);
+    }
+  }
+  if (worker.currentMessageId) {
+    const message = state.messages.find((item) => item.id === worker.currentMessageId);
+    if (message?.status === 'running') {
+      message.status = 'queued';
+      message.assignmentId = null;
+      message.lastDeferredReason = `${reason}; message requeued`;
+      appendJournal(state, 'message.requeued', `${message.id} requeued because ${workerId} became stale`);
+    }
+  }
+  worker.lastTabId = Number.isInteger(worker.tabId) ? worker.tabId : worker.lastTabId;
+  worker.tabId = null;
+  worker.windowId = null;
+  worker.activeWindowId = null;
+  worker.currentAssignmentId = null;
+  worker.currentTaskId = null;
+  worker.currentMessageId = null;
+  worker.busy = false;
+  worker.status = 'stale';
+  worker.lifecycle = 'stale';
+  worker.heartbeatAt = 0;
+  worker.pageBusyUntil = 0;
+  worker.lastStaleReason = reason;
+  worker.staleAt = now();
+  liveHeartbeats.delete(workerId);
+  appendJournal(state, 'worker.stale', `${workerId} binding released`, { reason });
+  return true;
+}
+
+async function markWorkerBindingStale(tabId, reason = 'tab closed') {
+  if (!Number.isInteger(tabId)) return false;
+  const { result } = await mutateFleet((state) => {
+    const worker = workerForTab(state, tabId);
+    return worker ? releaseWorkerBinding(state, worker.id, reason) : false;
+  });
+  schedule().catch(() => {});
+  return result === true;
+}
+
+async function reconcileStaleWorkerBindings(reason = 'binding reconciliation') {
+  const state = await loadFleetState();
+  const bound = Object.values(state.workers).filter((worker) => worker.enabled && Number.isInteger(worker.tabId));
+  const liveTabs = new Map();
+  await Promise.all(bound.map(async (worker) => {
+    const tab = await supportedTab(worker.tabId);
+    if (tab) liveTabs.set(worker.id, tab);
+  }));
+  const staleIds = bound.filter((worker) => !liveTabs.has(worker.id)).map((worker) => worker.id);
+  if (!staleIds.length) return { stale: [] };
+  await mutateFleet((latest) => {
+    for (const workerId of staleIds) releaseWorkerBinding(latest, workerId, reason);
+  });
+  schedule().catch(() => {});
+  return { stale: staleIds };
+}
+
 function upsertWorker(state, tab, patch = {}) {
-  const id = workerIdForTab(tab.id);
+  const bound = workerForTab(state, tab.id);
+  const requestedSlot = !bound && patch.workerId && state.workers[patch.workerId] && !Number.isInteger(state.workers[patch.workerId].tabId)
+    ? state.workers[patch.workerId]
+    : null;
+  const staleSameTab = !bound && !requestedSlot
+    ? Object.values(state.workers).find((worker) => !Number.isInteger(worker.tabId) && worker.lastTabId === tab.id)
+    : null;
+  const staleManaged = !bound && !requestedSlot && !staleSameTab && patch.topologyManaged === true
+    ? Object.values(state.workers).find((worker) => worker.topologyManaged === true
+      && canonicalRole(worker.role) === canonicalRole(patch.role)
+      && !Number.isInteger(worker.tabId))
+    : null;
+  const id = bound?.id || requestedSlot?.id || staleSameTab?.id || staleManaged?.id || allocateWorkerSlot(state);
   const existing = state.workers[id] || {};
+  const requestedRole = canonicalRole(patch.role || existing.role);
+  if (existing.currentAssignmentId && requestedRole !== canonicalRole(existing.role)) {
+    throw new Error('cannot change role while worker owns an active assignment');
+  }
   const worker = {
     id,
     tabId: tab.id,
     name: patch.name || existing.name || `ChatGPT ${tab.id}`,
-    role: normalizeRole(patch.role || existing.role),
+    role: requestedRole,
     capabilities: Array.isArray(patch.capabilities)
       ? [...new Set(patch.capabilities.map(String))]
       : (existing.capabilities || defaultCapabilities()),
@@ -804,18 +1105,31 @@ function upsertWorker(state, tab, patch = {}) {
     heartbeatAt: patch.heartbeatAt || existing.heartbeatAt || 0,
     progressVersion: Number(existing.progressVersion || 0),
     lastResultAt: existing.lastResultAt || 0,
+    chatTurnCount: Math.max(0, Math.trunc(Number(existing.chatTurnCount || 0))),
+    chatRotationPending: existing.chatRotationPending === true
+      || Math.max(0, Math.trunc(Number(existing.chatTurnCount || 0))) >= boundedMaxTurnsPerChat(state.policy.maxTurnsPerChat),
+    lastCountedAssignmentId: String(existing.lastCountedAssignmentId || ''),
+    lastChatRotationAt: Number(existing.lastChatRotationAt || 0),
     registeredAt: existing.registeredAt || now(),
     windowId: Number.isInteger(tab.windowId) ? tab.windowId : (existing.windowId || null),
     activeWindowId: existing.activeWindowId || null,
-    lifecycle: ['sleeping', 'parking'].includes(existing.lifecycle) ? 'idle' : (existing.lifecycle || (existing.currentAssignmentId ? 'running' : 'idle')),
+    lifecycle: ['sleeping', 'parking', 'stale'].includes(existing.lifecycle) ? 'idle' : (existing.lifecycle || (existing.currentAssignmentId ? 'running' : 'idle')),
     warmIdleSince: existing.warmIdleSince || 0,
     warmIdleUntil: existing.warmIdleUntil || 0,
+    topologyManaged: patch.topologyManaged !== undefined
+      ? patch.topologyManaged === true
+      : existing.topologyManaged === true,
+    legacyWorkerId: existing.legacyWorkerId || undefined,
+    lastTabId: tab.id,
+    staleAt: 0,
+    lastStaleReason: '',
   };
   if (!worker.currentAssignmentId && worker.enabled && worker.status !== 'blocked') {
     worker.status = worker.busy ? 'waiting' : 'idle';
     if (worker.lifecycle === 'running' || worker.lifecycle === 'activating') worker.lifecycle = 'idle';
   }
   state.workers[id] = worker;
+  if (worker.lifecycle === 'stale' || !worker.enabled) worker.lifecycle = worker.enabled ? 'idle' : 'stale';
   return worker;
 }
 
@@ -884,10 +1198,27 @@ async function unregisterWorker(workerId) {
   return publicSnapshot(state);
 }
 
-function taskRunnable(state, task) {
-  if (task.status !== 'pending') return false;
+function taskBlockReason(state, task, worker = null) {
+  if (!task || task.status !== 'pending') return task?.status === 'pending' ? '' : `task status is ${task?.status || 'unknown'}`;
   const deps = Array.isArray(task.dependencies) ? task.dependencies : [];
-  return deps.every((id) => state.tasks[id]?.status === 'done');
+  const missing = deps.filter((id) => state.tasks[id]?.status !== 'done');
+  if (missing.length) return `waiting for dependencies: ${missing.join(', ')}`;
+  const taskRole = canonicalRole(task.role);
+  if (['review', 'test'].includes(taskRole)) {
+    const dependencyWorkers = new Set(deps.map((id) => state.tasks[id]?.completedByWorkerId).filter(Boolean));
+    if (worker && dependencyWorkers.has(worker.id)) return `${taskRole} requires an independent worker from direct dependency completers`;
+  }
+  if (taskRole === 'integrator') {
+    if (!deps.length) return 'integrator tasks require at least one direct dependency';
+    if (deps.some((id) => state.tasks[id]?.status !== 'done')) return 'integrator requires every direct dependency to be done';
+    if (!deps.some((id) => ['review', 'test'].includes(canonicalRole(state.tasks[id]?.role)))) return 'integrator requires a direct review or test dependency';
+    if (worker && deps.some((id) => state.tasks[id]?.completedByWorkerId === worker.id)) return 'integrator must use a worker independent from dependency completers';
+  }
+  return '';
+}
+
+function taskRunnable(state, task) {
+  return taskBlockReason(state, task) === '';
 }
 
 function workerBusyIsFresh(worker, at = now()) {
@@ -898,17 +1229,24 @@ function workerBusyIsFresh(worker, at = now()) {
   return heartbeatAt > 0 && at - heartbeatAt <= WORKER_BUSY_FRESH_MS;
 }
 
-function workerMatches(worker, task) {
-  if (!worker.enabled || worker.currentAssignmentId || workerBusyIsFresh(worker)) return false;
-  if (!['idle', 'waiting'].includes(worker.status)) return false;
-  const role = normalizeRole(task.role);
-  return role === 'generalist' || worker.role === role || worker.role === 'generalist';
+function workerMatchRank(worker, task, state = null) {
+  if (!worker.enabled || worker.lifecycle === 'stale' || worker.chatRotationPending || !Number.isInteger(worker.tabId) || worker.currentAssignmentId || workerBusyIsFresh(worker)) return Number.POSITIVE_INFINITY;
+  if (!['idle', 'waiting'].includes(worker.status)) return Number.POSITIVE_INFINITY;
+  const taskRole = canonicalRole(task.role);
+  const workerRole = canonicalRole(worker.role);
+  if (state && taskBlockReason(state, task, worker)) return Number.POSITIVE_INFINITY;
+  if (workerRole === taskRole) return 0;
+  return Number.POSITIVE_INFINITY;
+}
+
+function workerMatches(worker, task, state = null) {
+  return Number.isFinite(workerMatchRank(worker, task, state));
 }
 
 function peerSummary(state, workerId) {
   return Object.values(state.workers)
-    .filter((w) => w.enabled && w.id !== workerId)
-    .slice(0, 12)
+    .filter((w) => w.enabled && w.lifecycle !== 'stale' && Number.isInteger(w.tabId) && w.id !== workerId)
+    .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
     .map((w) => `- ${w.id}: ${w.role} (${w.status})`)
     .join('\n') || '- no other registered workers';
 }
@@ -939,14 +1277,47 @@ function fleetProtocolText() {
   ].join('\n');
 }
 
+function coordinatorProtocolText() {
+  return [
+    'COORDINATOR CONTROL LOOP:',
+    '1. DECOMPOSE — create bounded specialist child tasks when the goal needs parallel work.',
+    '2. ROUTE — send explicit FLEET_MESSAGE envelopes to the relevant live specialists.',
+    '3. OBSERVE — consume peer results/evidence before changing the plan.',
+    '4. REPLAN — create follow-up child tasks when evidence changes the DAG.',
+    '5. ESCALATE — send FLEET_MESSAGE to="operator" when a decision or intervention exceeds coordinator authority.',
+    '',
+    'Only Coordinator may create child tasks. Use:',
+    '[FLEET_TASK role="implementation" title="Bounded task title" depends="T-1,T-2" priority="0"]',
+    'Natural-language assignment for the specialist.',
+    '[/FLEET_TASK]',
+    'The depends and priority attributes are optional. Child tasks may target research, architect, implementation, review, test, or integrator; do not create coordinator child tasks.',
+  ].join('\n');
+}
+
 function buildTaskPrompt(state, task, worker) {
+  const taskContract = ROLE_CATALOG.find((role) => role.id === canonicalRole(task.role)) || ROLE_CATALOG[0];
+  const workerContract = ROLE_CATALOG.find((role) => role.id === canonicalRole(worker.role)) || ROLE_CATALOG[0];
+  const separationNote = canonicalRole(task.role) === 'coordinator'
+    ? 'Coordinator control loop only: decompose, route, observe, replan, and escalate. Do not perform specialist implementation, review, test, architecture, research, or integration work yourself.'
+    : 'Do not claim authority beyond this contract or verify work you completed yourself.';
   return [
     '[MODEL FLEET ASSIGNMENT]',
     `Worker: ${worker.id}`,
     `Role: ${worker.role}`,
+    `Requested task role: ${task.role}`,
+    `Active role contract purpose: ${taskContract.purpose}`,
+    `Active role authority scope: ${taskContract.authorityScope}`,
+    `Active role claim types: ${taskContract.claimTypes.join(', ')}`,
+    `Active role prohibited actions: ${taskContract.prohibitedActions.join('; ')}`,
+    `Active role allowed handoffs: ${taskContract.allowedHandoffs.join(', ')}`,
+    `Worker role contract: ${workerContract.purpose}; authority: ${workerContract.authorityScope}`,
+    `Independent verification required: ${taskContract.requiresIndependentVerification ? 'yes' : 'no'}`,
+    `Separation of duty: ${separationNote}`,
     `Task: ${task.id} — ${task.title}`,
     state.goal ? `Fleet goal: ${state.goal}` : 'Fleet goal: not set',
     '',
+    canonicalRole(task.role) === 'coordinator' ? coordinatorProtocolText() : '',
+    canonicalRole(task.role) === 'coordinator' ? '' : '',
     task.prompt,
     '',
     'Work independently and make concrete progress. You may use tools actually available in this ChatGPT session.',
@@ -973,6 +1344,8 @@ function buildMessagePrompt(state, message, worker) {
     '',
     'Respond by acting on the message. You may use tools actually available in this ChatGPT session, including chatgpt-mcp-connector when available.',
     '',
+    canonicalRole(worker.role) === 'coordinator' ? coordinatorProtocolText() : '',
+    canonicalRole(worker.role) === 'coordinator' ? '' : '',
     'Registered peer routing targets:',
     peerSummary(state, worker.id),
     'When the instruction requires sending to another worker, use that peer exact W-... ID in the FLEET_MESSAGE to= field.',
@@ -992,6 +1365,15 @@ function normalizeFleetProtocolSource(text) {
     .replace(/[‘’‚‛]/g, "'");
 }
 
+function parseFleetAttributes(source) {
+  const attrs = {};
+  const attrRe = /\b([A-Za-z][A-Za-z0-9_-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s\]]+))/g;
+  for (const match of String(source || '').matchAll(attrRe)) {
+    attrs[String(match[1] || '').toLowerCase()] = String(match[2] ?? match[3] ?? match[4] ?? '').trim();
+  }
+  return attrs;
+}
+
 function parseFleetOutput(text) {
   const source = normalizeFleetProtocolSource(text);
   const messages = [];
@@ -1001,16 +1383,92 @@ function parseFleetOutput(text) {
     const body = String(match[4] || '').trim();
     if (to && body) messages.push({ to, body });
   }
+
+  const tasks = [];
+  const taskRe = /\[\s*FLEET_TASK\b([^\]]*)\]([\s\S]*?)\[\s*\/\s*FLEET_TASK\s*\]/gi;
+  for (const match of source.matchAll(taskRe)) {
+    const attrs = parseFleetAttributes(match[1]);
+    const prompt = String(match[2] || '').trim();
+    const role = String(attrs.role || '').trim();
+    const title = String(attrs.title || '').trim();
+    if (!role || !title || !prompt) continue;
+    tasks.push({
+      key: String(attrs.key || '').trim(),
+      role,
+      title,
+      prompt,
+      dependencies: String(attrs.depends || '').split(',').map((item) => item.trim()).filter(Boolean),
+      priority: Math.max(-100, Math.min(100, Number(attrs.priority || 0) || 0)),
+    });
+  }
+
   const statusMatch = source.match(/\[\s*FLEET_STATUS\b[^\]]*?\bstate\s*=\s*(?:"(done|blocked)"|'(done|blocked)'|(done|blocked))\s*\]([\s\S]*?)\[\s*\/\s*FLEET_STATUS\s*\]/i);
   const statusState = statusMatch ? (statusMatch[1] || statusMatch[2] || statusMatch[3]) : null;
   const markerPresent = /\[\s*\/?\s*FLEET_MESSAGE\b/i.test(source);
+  const taskMarkerPresent = /\[\s*\/?\s*FLEET_TASK\b/i.test(source);
   return {
     state: statusState ? statusState.toLowerCase() : 'done',
     statusNote: statusMatch ? String(statusMatch[4] || '').trim() : '',
     messages,
+    tasks,
     markerPresent,
+    taskMarkerPresent,
     malformedMessageEnvelope: markerPresent && messages.length === 0,
+    malformedTaskEnvelope: taskMarkerPresent && tasks.length === 0,
   };
+}
+
+function createTaskInState(state, {
+  title,
+  prompt,
+  role,
+  priority = 0,
+  dependencies = [],
+  parentTaskId = null,
+  createdByWorkerId = null,
+  createdByRole = null,
+}, { allowCoordinator = true } = {}) {
+  const id = `T-${state.nextTask++}`;
+  const taskRole = canonicalRole(role);
+  if (!allowCoordinator && taskRole === 'coordinator') throw new Error('coordinator may not create coordinator child tasks');
+  const dependencyIds = Array.from(new Set((Array.isArray(dependencies) ? dependencies : []).filter((depId) => state.tasks[depId])));
+  const task = {
+    id,
+    title: String(title || '').trim() || id,
+    prompt: String(prompt || '').trim(),
+    role: taskRole,
+    priority: Math.max(-100, Math.min(100, Number(priority || 0))),
+    dependencies: dependencyIds,
+    parentTaskId: parentTaskId && state.tasks[parentTaskId] ? parentTaskId : null,
+    createdByWorkerId: createdByWorkerId || null,
+    createdByRole: createdByRole ? canonicalRole(createdByRole) : null,
+    status: 'pending',
+    assignedWorkerId: null,
+    assignmentId: null,
+    attempts: 0,
+    createdAt: now(),
+    startedAt: 0,
+    completedAt: 0,
+    result: '',
+    statusNote: '',
+    autoRecoveryAttempts: 0,
+    lastAutoRecoveryReason: '',
+  };
+  if (!task.prompt) throw new Error('task prompt is required');
+  if (task.role === 'integrator') {
+    if (!task.dependencies.length) throw new Error('integrator tasks require at least one direct dependency');
+    if (!task.dependencies.some((depId) => ['review', 'test'].includes(canonicalRole(state.tasks[depId]?.role)))) {
+      throw new Error('integrator tasks require a direct review or test dependency');
+    }
+  }
+  state.tasks[id] = task;
+  appendJournal(state, 'task.created', `${id}: ${task.title}`, {
+    role: task.role,
+    parentTaskId: task.parentTaskId,
+    createdByWorkerId: task.createdByWorkerId,
+    createdByRole: task.createdByRole,
+  });
+  return task;
 }
 
 function queueSemanticMessage(state, {
@@ -1051,6 +1509,10 @@ function queueSemanticMessage(state, {
 
 function routeParsedMessages(state, fromWorkerId, parsed, taskId) {
   const result = { queued: [], failures: [] };
+  const source = state.workers[fromWorkerId];
+  const relatedTask = taskId ? state.tasks[taskId] : null;
+  const sourceRole = roleContract(relatedTask?.role || source?.role);
+  const allowedHandoffs = new Set(sourceRole.allowedHandoffs || []);
   for (const item of parsed.messages) {
     const target = item.to;
     if (target === fromWorkerId) {
@@ -1066,7 +1528,7 @@ function routeParsedMessages(state, fromWorkerId, parsed, taskId) {
     if (target === 'broadcast') {
       let broadcastCount = 0;
       for (const worker of Object.values(state.workers)) {
-        if (worker.enabled && worker.id !== fromWorkerId) {
+        if (worker.enabled && worker.lifecycle !== 'stale' && Number.isInteger(worker.tabId) && worker.id !== fromWorkerId && allowedHandoffs.has(canonicalRole(worker.role))) {
           const queued = queueSemanticMessage(state, { fromWorkerId, toWorkerId: worker.id, body: item.body, taskId });
           result.queued.push(queued.id);
           broadcastCount += 1;
@@ -1077,13 +1539,69 @@ function routeParsedMessages(state, fromWorkerId, parsed, taskId) {
       }
       continue;
     }
-    if (state.workers[target]?.enabled) {
+    if (state.workers[target]?.enabled && state.workers[target].lifecycle !== 'stale' && Number.isInteger(state.workers[target].tabId)) {
+      const targetRole = canonicalRole(state.workers[target].role);
+      if (!allowedHandoffs.has(targetRole)) {
+        appendJournal(state, 'message.route_failed', `${fromWorkerId} attempted a disallowed ${sourceRole?.id || 'unknown'} → ${targetRole} handoff`, { taskId, target });
+        result.failures.push({ target, body: item.body, reason: `source role ${sourceRole?.id || 'unknown'} is not allowed to hand off to ${targetRole}` });
+        continue;
+      }
       const queued = queueSemanticMessage(state, { fromWorkerId, toWorkerId: target, body: item.body, taskId });
       result.queued.push(queued.id);
     } else {
       appendJournal(state, 'message.route_failed', `${fromWorkerId} produced an unroutable peer target ${target}`, { taskId });
       result.failures.push({ target, body: item.body, reason: 'recipient is not a currently enabled registered worker' });
     }
+  }
+  return result;
+}
+
+function routeCoordinatorTasks(state, fromWorkerId, parsed, parentTaskId = null) {
+  const result = { created: [], failures: [] };
+  if (!parsed.tasks?.length && !parsed.malformedTaskEnvelope) return result;
+
+  const source = state.workers[fromWorkerId];
+  const parentTask = parentTaskId ? state.tasks[parentTaskId] : null;
+  const effectiveRole = canonicalRole(parentTask?.role || source?.role);
+  if (effectiveRole !== 'coordinator') {
+    for (const item of parsed.tasks || []) {
+      result.failures.push({ key: item.key || '', title: item.title || '', reason: 'only Coordinator may create child tasks' });
+    }
+    if (parsed.malformedTaskEnvelope) result.failures.push({ key: '', title: '', reason: 'malformed FLEET_TASK envelope' });
+    return result;
+  }
+
+  const aliases = new Map();
+  for (const item of parsed.tasks || []) {
+    try {
+      const dependencies = [];
+      for (const raw of item.dependencies || []) {
+        const token = String(raw || '').trim();
+        if (!token) continue;
+        const alias = token.startsWith('$') ? token.slice(1) : token;
+        if (state.tasks[token]) dependencies.push(token);
+        else if (aliases.has(alias)) dependencies.push(aliases.get(alias));
+        else throw new Error(`unknown dependency ${token}; child-task aliases may reference only earlier FLEET_TASK keys`);
+      }
+      if (item.key && aliases.has(item.key)) throw new Error(`duplicate child-task key ${item.key}`);
+      const task = createTaskInState(state, {
+        title: item.title,
+        prompt: item.prompt,
+        role: item.role,
+        priority: item.priority,
+        dependencies,
+        parentTaskId,
+        createdByWorkerId: fromWorkerId,
+        createdByRole: 'coordinator',
+      }, { allowCoordinator: false });
+      if (item.key) aliases.set(item.key, task.id);
+      result.created.push(task.id);
+    } catch (error) {
+      result.failures.push({ key: item.key || '', title: item.title || '', reason: String(error?.message || error) });
+    }
+  }
+  if (parsed.malformedTaskEnvelope) {
+    result.failures.push({ key: '', title: '', reason: 'malformed FLEET_TASK envelope: role, title, and body are required' });
   }
   return result;
 }
@@ -1154,7 +1672,10 @@ function chooseDispatches(state) {
   let active = Object.values(state.workers).filter((w) => w.currentAssignmentId).length;
   const dispatches = [];
   const available = () => Object.values(state.workers).filter((w) => w.enabled
+    && w.lifecycle !== 'stale'
+    && Number.isInteger(w.tabId)
     && !w.currentAssignmentId
+    && !w.chatRotationPending
     && !workerBusyIsFresh(w)
     && Number(w.pageBusyUntil || 0) <= now()
     && w.status !== 'blocked');
@@ -1197,7 +1718,12 @@ function chooseDispatches(state) {
 
   for (const task of tasks) {
     if (active >= maxConcurrency) break;
-    const worker = available().find((candidate) => workerMatches(candidate, task));
+    const worker = available()
+      .map((candidate) => ({ candidate, rank: workerMatchRank(candidate, task, state) }))
+      .filter(({ rank }) => Number.isFinite(rank))
+      .sort((a, b) => a.rank - b.rank
+        || Number(a.candidate.registeredAt || 0) - Number(b.candidate.registeredAt || 0)
+        || a.candidate.id.localeCompare(b.candidate.id, undefined, { numeric: true }))[0]?.candidate;
     if (!worker) continue;
     const assignmentId = `A-${task.id}-${state.generation + 1}`;
     task.status = 'running';
@@ -1277,14 +1803,14 @@ async function failDispatch(dispatch, error) {
 
 async function journalDeferredMessages(preview, reason) {
   const queued = preview.messages.filter((message) => message.status === 'queued' && message.toWorkerId !== 'operator');
-  if (!queued.length) return;
-  await mutateFleet((state) => {
+  if (queued.length) await mutateFleet((state) => {
     for (const message of queued) {
       const target = state.workers[message.toWorkerId];
       let detail = reason;
       if (!target) detail = 'target worker missing';
       else if (!target.enabled) detail = 'target worker disabled';
       else if (target.currentAssignmentId) detail = `target owns ${target.currentAssignmentId}`;
+      else if (target.lifecycle === 'stale' || !Number.isInteger(target.tabId)) detail = 'target worker stale or unbound';
       else if (target.status === 'blocked') detail = 'target worker blocked';
       else if (workerBusyIsFresh(target)) detail = 'target worker busy with fresh heartbeat';
       if (message.lastDeferredReason === detail) continue;
@@ -1292,6 +1818,18 @@ async function journalDeferredMessages(preview, reason) {
       appendJournal(state, 'schedule.deferred', `${message.id} → ${message.toWorkerId}: ${detail}`);
     }
   });
+  for (const task of Object.values(preview.tasks)) {
+    if (task.status !== 'pending') continue;
+    const workflowReason = taskBlockReason(preview, task);
+    if (workflowReason && task.statusNote !== `blocked: ${workflowReason}`) {
+      await mutateFleet((state) => {
+        const current = state.tasks[task.id];
+        if (!current || current.status !== 'pending') return;
+        current.statusNote = `blocked: ${workflowReason}`;
+        appendJournal(state, 'schedule.workflow_blocked', `${task.id}: ${workflowReason}`, { role: task.role });
+      });
+    }
+  }
 }
 
 async function dispatchReserved(dispatch) {
@@ -1329,6 +1867,19 @@ async function dispatchReserved(dispatch) {
         worker.lastDispatchError = '';
         worker.dispatchFailureCount = 0;
         worker.lastDispatchFailureAt = 0;
+        if (worker.lastCountedAssignmentId !== dispatch.assignment.id) {
+          worker.lastCountedAssignmentId = dispatch.assignment.id;
+          worker.chatTurnCount = Math.max(0, Math.trunc(Number(worker.chatTurnCount || 0))) + 1;
+          const limit = boundedMaxTurnsPerChat(state.policy.maxTurnsPerChat);
+          if (worker.chatTurnCount >= limit) {
+            worker.chatRotationPending = true;
+            appendJournal(state, 'worker.chat_limit_reached', dispatch.workerId + ' reached ' + worker.chatTurnCount + '/' + limit + ' turns', {
+              assignmentId: dispatch.assignment.id,
+              turns: worker.chatTurnCount,
+              limit,
+            });
+          }
+        }
       }
       appendJournal(state, 'dispatch.accepted', `${dispatch.assignment.id} accepted by ${dispatch.workerId}`, {
         workerId: dispatch.workerId,
@@ -1371,6 +1922,7 @@ async function schedule() {
       await journalDeferredMessages(preview, preview.policy.paused ? 'dispatch paused' : 'authority revoked');
       return;
     }
+    startPendingChatRotations(preview);
     const active = Object.values(preview.workers).filter((worker) => worker.currentAssignmentId).length;
     const maxConcurrency = Math.max(1, Math.min(64, Number(preview.policy.maxConcurrency || 8)));
     if (active >= maxConcurrency) {
@@ -1387,12 +1939,18 @@ async function schedule() {
         && !workerBusyIsFresh(target)
         && Number(target.pageBusyUntil || 0) <= now()
         && target.status !== 'blocked'
-        && target.lifecycle !== 'parking';
+        && !target.chatRotationPending
+        && target.lifecycle !== 'parking'
+        && target.lifecycle !== 'stale'
+        && Number.isInteger(target.tabId);
     });
     const runnableTasks = Object.values(preview.tasks).filter((task) => taskRunnable(preview, task));
     const hasRunnableTask = runnableTasks.length > 0;
-    const hasDispatchableTask = runnableTasks.some((task) => Object.values(preview.workers).some((worker) => workerMatches(worker, task)));
-    if (!hasQueuedMessage && !hasRunnableTask) return;
+    const hasDispatchableTask = runnableTasks.some((task) => Object.values(preview.workers).some((worker) => workerMatches(worker, task, preview)));
+    if (!hasQueuedMessage && !hasRunnableTask) {
+      await journalDeferredMessages(preview, 'no runnable work');
+      return;
+    }
     if (!hasDispatchableMessage && !hasDispatchableTask) {
       await journalDeferredMessages(preview, hasQueuedMessage ? 'target not currently eligible' : 'no eligible worker');
       return;
@@ -1446,8 +2004,10 @@ async function scheduleMessageUntilAdmitted(messageId, maxAttempts = 5) {
 }
 
 async function completeAssignment(senderTabId, payload) {
-  liveHeartbeats.delete(workerIdForTab(senderTabId));
-  const workerId = workerIdForTab(senderTabId);
+  const loaded = await loadFleetState();
+  const workerId = workerIdForTabInState(loaded, senderTabId);
+  if (!workerId) return publicSnapshot(loaded);
+  liveHeartbeats.delete(workerId);
   const responseText = String(payload.text || '').slice(0, MAX_RESULT_CHARS);
   const parsed = parseFleetOutput(responseText);
   const { state } = await mutateFleet((state) => {
@@ -1460,7 +2020,22 @@ async function completeAssignment(senderTabId, payload) {
       ? state.messages.find((message) => message.id === finishedMessageId)
       : null;
 
-    const routeResult = routeParsedMessages(state, workerId, parsed, finishedTaskId || null);
+    const relatedTaskId = finishedTaskId || sourceMessage?.taskId || null;
+    const routeResult = routeParsedMessages(state, workerId, parsed, relatedTaskId);
+    const childTaskResult = routeCoordinatorTasks(state, workerId, parsed, relatedTaskId);
+    if (childTaskResult.failures.length) {
+      queueSemanticMessage(state, {
+        from: 'scheduler',
+        toWorkerId: workerId,
+        body: [
+          'COORDINATOR CHILD-TASK CREATION FAILURE.',
+          'One or more FLEET_TASK envelopes were rejected by the control plane.',
+          ...childTaskResult.failures.map((failure) => `- ${failure.key || failure.title || 'task'}: ${failure.reason}`),
+          'Observe the failure, replan, and emit corrected child tasks if still required.',
+        ].join('\n'),
+        taskId: relatedTaskId,
+      });
+    }
     const repairReason = protocolRepairReason(parsed, routeResult, sourceMessage);
     let repairMessage = null;
     let repairExhausted = false;
@@ -1507,6 +2082,8 @@ async function completeAssignment(senderTabId, payload) {
         task.status = parsed.state === 'blocked' ? 'blocked' : 'done';
         task.completedAt = now();
         task.result = responseText;
+        task.completedByWorkerId = workerId;
+        task.completedByRole = canonicalRole(worker.role);
         task.statusNote = repairMessage
           ? `peer routing repair queued as ${repairMessage.id}`
           : parsed.statusNote;
@@ -1535,7 +2112,10 @@ async function completeAssignment(senderTabId, payload) {
       workerId,
       taskId: finishedTaskId || null,
       messageCount: parsed.messages.length,
+      childTaskCount: childTaskResult.created.length,
+      childTaskFailureCount: childTaskResult.failures.length,
       markerPresent: parsed.markerPresent,
+      taskMarkerPresent: parsed.taskMarkerPresent,
       malformedMessageEnvelope: parsed.malformedMessageEnvelope,
       routedMessageCount: routeResult.queued.length,
       routeFailureCount: routeResult.failures.length,
@@ -1551,7 +2131,12 @@ async function completeAssignment(senderTabId, payload) {
     worker.progressVersion = Number(worker.progressVersion || 0) + 1;
     worker.heartbeatAt = now();
   });
-  await beginWarmIdle(workerId, `assignment ${payload.assignmentId || 'unknown'} completed`);
+  const completed = await loadFleetState();
+  if (completed.workers[workerId]?.chatRotationPending) {
+    await rotateWorkerChat(workerId, 'turn cap reached after ' + (payload.assignmentId || 'assignment')).catch(() => {});
+  } else {
+    await beginWarmIdle(workerId, `assignment ${payload.assignmentId || 'unknown'} completed`);
+  }
   schedule().catch(() => {});
   return publicSnapshot(await loadFleetState());
 }
@@ -1601,7 +2186,9 @@ async function flushWorkerHeartbeats() {
 
 async function updateWorkerHeartbeat(tab, payload) {
   const observedAt = now();
-  const workerId = workerIdForTab(tab.id);
+  const state = await loadFleetState();
+  const workerId = workerIdForTabInState(state, tab.id);
+  if (!workerId) return { heartbeatAt: observedAt, registered: false };
   liveHeartbeats.set(workerId, {
     at: observedAt,
     busy: payload.busy === true,
@@ -1621,8 +2208,10 @@ async function updateWorkerHeartbeat(tab, payload) {
 }
 
 async function reconcileOnHello(tab, payload = {}) {
-  liveHeartbeats.delete(workerIdForTab(tab.id));
-  const workerId = workerIdForTab(tab.id);
+  const loaded = await loadFleetState();
+  const workerId = workerIdForTabInState(loaded, tab.id);
+  if (!workerId) return { registered: false, worker: null, snapshot: publicSnapshot(loaded) };
+  liveHeartbeats.delete(workerId);
   const liveAssignmentId = payload.activeAssignmentId || null;
   const { state, result } = await mutateFleet((state) => {
     const worker = state.workers[workerId];
@@ -1692,7 +2281,7 @@ async function updateBadge(tabId, approvalState = null) {
   }
   const state = approvalState || await getTabState(tabId);
   const fleet = await loadFleetState();
-  const worker = fleet.workers[workerIdForTab(tabId)];
+  const worker = workerForTab(fleet, tabId);
   let text = '';
   let color = '#166534';
   if (worker?.enabled) {
@@ -1705,38 +2294,167 @@ async function updateBadge(tabId, approvalState = null) {
   if (text) await chrome.action.setBadgeBackgroundColor({ tabId, color });
 }
 
-async function registerAllSupportedTabs() {
-  const tabs = await chrome.tabs.query({});
-  const supported = tabs.filter((tab) => Number.isInteger(tab.id) && SUPPORTED_URL.test(tab.url || ''));
-  const { state } = await mutateFleet((state) => {
-    for (const tab of supported) {
-      const worker = upsertWorker(state, tab, { enabled: true });
-      appendJournal(state, 'worker.registered', `${worker.id} registered`, { source: 'register-all' });
-    }
-  });
-  await cleanupLegacySleepTabs('register-all migration');
-  for (const tab of supported) {
-    updateBadge(tab.id).catch(() => {});
-    const workerId = workerIdForTab(tab.id);
-    const current = await loadFleetState();
-    const worker = current.workers[workerId];
-    try {
-      if (current.policy.activeWorkerWindows && worker) await ensureWorkerWindow(workerId);
-      const bridgeState = await ensureFleetBridge(tab.id);
-      await mutateFleet((latest) => reconcileBridgeRuntimeState(latest, workerId, bridgeState));
-      await chrome.tabs.sendMessage(tab.id, { type: 'fleet:registration-changed', registered: true, worker });
-    } catch (error) {
-      await mutateFleet((latest) => {
-        const item = latest.workers[workerId];
-        if (item && !item.currentAssignmentId) item.status = 'idle';
-        appendJournal(latest, 'worker.bridge_failed', `${workerId} bridge unavailable`, { error: String(error) });
-      });
-    }
+function roleCountsForWorkers(state) {
+  const counts = Object.fromEntries(ROLE_CATALOG.map((role) => [role.id, 0]));
+  for (const worker of Object.values(state.workers)) {
+    if (!worker?.enabled || worker.lifecycle === 'stale' || !Number.isInteger(worker.tabId)) continue;
+    const role = canonicalRole(worker.role);
+    counts[role] = Number(counts[role] || 0) + 1;
   }
-  schedule().catch(() => {});
-  return publicSnapshot(await loadFleetState());
+  return counts;
 }
 
+async function setTopologyRoleCount(role, count) {
+  const normalized = normalizeRole(role);
+  if (!ROLE_IDS.has(normalized)) throw new Error('unsupported fleet role');
+  const nextCount = Math.max(0, Math.min(MAX_ROLE_COUNT, Math.trunc(Number(count) || 0)));
+  const { state } = await mutateFleet((state) => {
+    state.topology = normalizeTopology(state.topology);
+    state.topology.desiredRoleCounts[normalized] = nextCount;
+    appendJournal(state, 'topology.role_target', `${normalized} target → ${nextCount}`);
+  });
+  return publicSnapshot(state);
+}
+
+async function createTopologyWorker(role) {
+  const canonical = canonicalRole(role);
+  const created = await chrome.windows.create({
+    url: 'https://chatgpt.com/',
+    focused: false,
+    type: 'normal',
+  });
+  if (!Number.isInteger(created?.id)) throw new Error(`failed to create ${canonical} worker window`);
+  const tabs = await chrome.tabs.query({ windowId: created.id });
+  const tab = tabs.find((item) => Number.isInteger(item.id) && SUPPORTED_URL.test(item.url || ''))
+    || tabs.find((item) => Number.isInteger(item.id));
+  if (!tab?.id) {
+    await chrome.windows.remove(created.id).catch(() => {});
+    throw new Error(`created ${canonical} window has no usable tab`);
+  }
+
+  try {
+    await waitForTabReady(tab.id, 30000);
+    const result = await registerTab(tab.id, { role: canonical, topologyManaged: true });
+    await mutateFleet((state) => {
+      const worker = state.workers[result.worker.id];
+      if (!worker) return;
+      worker.topologyManaged = true;
+      worker.windowId = created.id;
+      appendJournal(state, 'topology.worker_created', `${worker.id} created for ${canonical}`, {
+        role: canonical,
+        windowId: created.id,
+      });
+    });
+    return result.worker.id;
+  } catch (error) {
+    await chrome.windows.remove(created.id).catch(() => {});
+    throw error;
+  }
+}
+
+async function removeTopologyWorker(worker) {
+  if (!worker?.topologyManaged) return false;
+  if (worker.currentAssignmentId || workerBusyIsFresh(worker)) return false;
+  const workerId = worker.id;
+  const tabId = worker.tabId;
+  const windowId = worker.windowId;
+  await unregisterWorker(workerId);
+
+  if (Number.isInteger(windowId)) {
+    try {
+      const win = await chrome.windows.get(windowId, { populate: true });
+      const tabs = win.tabs || [];
+      if (tabs.length === 1 && tabs[0]?.id === tabId) {
+        await chrome.windows.remove(windowId);
+        return true;
+      }
+    } catch {
+      return true;
+    }
+  }
+  if (Number.isInteger(tabId)) await chrome.tabs.remove(tabId).catch(() => {});
+  return true;
+}
+
+let topologyReconcilePromise = null;
+
+async function reconcileFleetTopology() {
+  if (topologyReconcilePromise) return topologyReconcilePromise;
+  topologyReconcilePromise = (async () => {
+    const removed = [];
+    const created = [];
+    const errors = [];
+    let deferredRemovals = 0;
+
+    await reconcileStaleWorkerBindings('topology reconciliation');
+    let state = await loadFleetState();
+    const desired = normalizeTopology(state.topology).desiredRoleCounts;
+
+    for (const role of ROLE_CATALOG) {
+      const current = roleCountsForWorkers(state)[role.id] || 0;
+      let excess = Math.max(0, current - desired[role.id]);
+      if (!excess) continue;
+      const candidates = Object.values(state.workers)
+        .filter((worker) => worker.enabled
+          && canonicalRole(worker.role) === role.id
+          && worker.topologyManaged === true
+          && !worker.currentAssignmentId
+          && !workerBusyIsFresh(worker))
+        .sort((a, b) => Number(b.registeredAt || 0) - Number(a.registeredAt || 0));
+      for (const worker of candidates.slice(0, excess)) {
+        try {
+          if (await removeTopologyWorker(worker)) removed.push(worker.id);
+        } catch (error) {
+          errors.push(`${worker.id}: ${String(error)}`);
+        }
+      }
+      state = await loadFleetState();
+      excess = Math.max(0, (roleCountsForWorkers(state)[role.id] || 0) - desired[role.id]);
+      deferredRemovals += excess;
+    }
+
+    state = await loadFleetState();
+    for (const role of ROLE_CATALOG) {
+      let missing = Math.max(0, desired[role.id] - (roleCountsForWorkers(state)[role.id] || 0));
+      while (missing > 0) {
+        try {
+          const workerId = await createTopologyWorker(role.id);
+          created.push(workerId);
+        } catch (error) {
+          errors.push(`${role.id}: ${String(error)}`);
+          break;
+        }
+        state = await loadFleetState();
+        missing = Math.max(0, desired[role.id] - (roleCountsForWorkers(state)[role.id] || 0));
+      }
+    }
+
+    await mutateFleet((latest) => {
+      appendJournal(latest, 'topology.reconciled', `fleet topology reconciled: +${created.length} / -${removed.length}`, {
+        created,
+        removed,
+        deferredRemovals,
+        errors,
+      });
+    });
+    schedule().catch(() => {});
+    return {
+      snapshot: publicSnapshot(await loadFleetState()),
+      created,
+      removed,
+      deferredRemovals,
+      errors,
+    };
+  })();
+
+  try {
+    return await topologyReconcilePromise;
+  } finally {
+    topologyReconcilePromise = null;
+  }
+}
+
+// async function registerAllSupportedTabs was intentionally removed: worker adoption is explicit.
 async function focusWorker(workerId) {
   await clearWarmIdleAlarm(workerId);
   const state = await loadFleetState();
@@ -1991,7 +2709,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return reply(loadFleetState().then((state) => ({ snapshot: publicSnapshot(state) })));
   }
   if (message.type === 'fleet:get-tab-worker-state') {
-    return reply(loadFleetState().then((state) => ({ worker: state.workers[workerIdForTab(message.tabId)] || null })));
+    return reply(loadFleetState().then((state) => ({ worker: workerForTab(state, message.tabId) || null })));
   }
   if (message.type === 'fleet:register-own-worker') {
     const tabId = sender.tab?.id;
@@ -1999,9 +2717,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message.type === 'fleet:register-tab') {
     return reply(registerTab(message.tabId, message.patch || {}).then(({ worker, snapshot }) => ({ worker, snapshot })));
-  }
-  if (message.type === 'fleet:register-all-tabs') {
-    return reply(registerAllSupportedTabs().then((snapshot) => ({ snapshot })));
   }
   if (message.type === 'fleet:unregister-worker') {
     return reply(unregisterWorker(message.workerId).then((snapshot) => ({ snapshot })));
@@ -2013,9 +2728,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return reply(mutateFleet((state) => {
       const worker = state.workers[message.workerId];
       if (!worker) throw new Error('worker not found');
-      worker.role = normalizeRole(message.role);
+      if (worker.currentAssignmentId) throw new Error('cannot change role while worker owns an active assignment');
+      worker.role = canonicalRole(message.role);
       appendJournal(state, 'worker.role', `${worker.id} role → ${worker.role}`);
     }).then(({ state }) => ({ snapshot: publicSnapshot(state) })));
+  }
+  if (message.type === 'fleet:set-topology-role-count') {
+    return reply(setTopologyRoleCount(message.role, message.count).then((snapshot) => ({ snapshot })));
+  }
+  if (message.type === 'fleet:reconcile-topology') {
+    return reply(reconcileFleetTopology());
   }
   if (message.type === 'fleet:set-goal') {
     return reply(mutateFleet((state) => {
@@ -2024,32 +2746,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }).then(({ state }) => ({ snapshot: publicSnapshot(state) })));
   }
   if (message.type === 'fleet:create-task') {
-    return reply(mutateFleet((state) => {
-      const id = `T-${state.nextTask++}`;
-      const task = {
-        id,
-        title: String(message.title || '').trim() || id,
-        prompt: String(message.prompt || '').trim(),
-        role: normalizeRole(message.role),
-        priority: Math.max(-100, Math.min(100, Number(message.priority || 0))),
-        dependencies: Array.isArray(message.dependencies) ? message.dependencies.filter((x) => state.tasks[x]) : [],
-        status: 'pending',
-        assignedWorkerId: null,
-        assignmentId: null,
-        attempts: 0,
-        createdAt: now(),
-        startedAt: 0,
-        completedAt: 0,
-        result: '',
-        statusNote: '',
-        autoRecoveryAttempts: 0,
-        lastAutoRecoveryReason: '',
-      };
-      if (!task.prompt) throw new Error('task prompt is required');
-      state.tasks[id] = task;
-      appendJournal(state, 'task.created', `${id}: ${task.title}`, { role: task.role });
-      return task;
-    }).then(({ state, result: task }) => {
+    return reply(mutateFleet((state) => createTaskInState(state, {
+      title: message.title,
+      prompt: message.prompt,
+      role: message.role,
+      priority: message.priority,
+      dependencies: message.dependencies,
+      createdByRole: 'operator',
+    }, { allowCoordinator: true })).then(({ state, result: task }) => {
       schedule().catch(() => {});
       return { task, snapshot: publicSnapshot(state) };
     }));
@@ -2106,6 +2810,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (Object.prototype.hasOwnProperty.call(patch, 'authorityEnabled')) state.policy.authorityEnabled = patch.authorityEnabled === true;
       if (Object.prototype.hasOwnProperty.call(patch, 'activeWorkerWindows')) state.policy.activeWorkerWindows = patch.activeWorkerWindows !== false;
       if (Object.prototype.hasOwnProperty.call(patch, 'warmIdleMs')) state.policy.warmIdleMs = boundedWarmIdleMs(patch.warmIdleMs);
+      if (Object.prototype.hasOwnProperty.call(patch, 'maxTurnsPerChat')) {
+        state.policy.maxTurnsPerChat = boundedMaxTurnsPerChat(patch.maxTurnsPerChat);
+        const limit = state.policy.maxTurnsPerChat;
+        for (const worker of Object.values(state.workers)) {
+          if (Math.max(0, Math.trunc(Number(worker.chatTurnCount || 0))) >= limit) worker.chatRotationPending = true;
+        }
+      }
       appendJournal(state, 'policy.changed', 'Execution policy updated', { ...state.policy });
     }).then(({ state }) => {
       schedule().catch(() => {});
@@ -2144,14 +2855,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message.type === 'fleet:worker-idle-ready') {
     if (!sender.tab?.id) return false;
-    const workerId = workerIdForTab(sender.tab.id);
-    beginWarmIdle(workerId, `assignment ${message.assignmentId || 'unknown'} acknowledged`).catch(() => {});
-    return false;
+    return reply(loadFleetState().then((state) => {
+      const workerId = workerIdForTabInState(state, sender.tab.id);
+      if (workerId) {
+        const worker = state.workers[workerId];
+        if (worker?.chatRotationPending) {
+          rotateWorkerChat(workerId, 'turn cap reached at idle acknowledgement').catch(() => {});
+        } else {
+          beginWarmIdle(workerId, `assignment ${message.assignmentId || 'unknown'} acknowledged`).catch(() => {});
+        }
+      }
+      return {};
+    }));
   }
   if (message.type === 'fleet:assignment-cancelled') {
     if (!sender.tab?.id) return false;
     return reply(mutateFleet((state) => {
-      const workerId = workerIdForTab(sender.tab.id);
+      const workerId = workerIdForTabInState(state, sender.tab.id);
+      if (!workerId) return false;
       const worker = state.workers[workerId];
       const reason = String(message.reason || '');
       const operatorCancelled = reason === OPERATOR_CANCEL_REASON;
@@ -2227,8 +2948,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   chrome.storage.session.remove(tabStateKey(tabId)).catch(() => {});
-  const workerId = workerIdForTab(tabId);
-  unregisterWorker(workerId).catch(() => {});
+  markWorkerBindingStale(tabId, 'tab closed').catch(() => {});
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
@@ -2238,14 +2958,20 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 
 chrome.runtime.onInstalled.addListener(() => {
-  normalizeIdleWorkers('extension reload migration').catch(() => {});
+  reconcileStaleWorkerBindings('extension installed').catch(() => {});
   ensureApprovalBridgesForSupportedTabs().catch(() => {});
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  normalizeIdleWorkers('browser startup normalization').catch(() => {});
+  reconcileStaleWorkerBindings('browser startup')
+    .then(() => loadFleetState())
+    .then((state) => startPendingChatRotations(state))
+    .catch(() => {});
 });
 
 // Also run once whenever the MV3 service worker itself is loaded/reloaded.
-cleanupLegacySleepTabs('service worker migration').catch(() => {});
+reconcileStaleWorkerBindings('service worker load')
+  .then(() => loadFleetState())
+  .then((state) => startPendingChatRotations(state))
+  .catch(() => {});
 ensureApprovalBridgesForSupportedTabs().catch(() => {});

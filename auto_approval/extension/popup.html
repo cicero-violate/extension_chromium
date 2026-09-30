@@ -20,9 +20,7 @@
     <div class="body">
       <div id="workerScope" class="scope">Loading current tab…</div>
       <button id="workerToggle" type="button">Loading…</button>
-      <select id="workerRole">
-        <option value="generalist">generalist</option><option value="research">research</option><option value="implementation">implementation</option><option value="review">review</option><option value="test">test</option>
-      </select>
+      <select id="workerRole"></select>
     </div>
   </section>
 
@@ -33,6 +31,8 @@
       <button id="tabEnabled" type="button">Loading…</button>
       <div id="features">
         <div class="row"><button id="autoApprove" type="button">Loading…</button><button id="autoScroll" type="button">Loading…</button></div>
+        <button id="autoRetry" type="button" title="Up to two retries/resends per user message; recovery may re-execute tools">Loading…</button>
+        <div class="scope">Retries stream errors and resends the last user message after “Message delivery timed out”. Recovery can re-execute tool calls. Enable only for idempotent work.</div>
         <button id="repeatToggle" type="button">Loading…</button>
         <div class="row">
           <select id="repeatMode" aria-label="Repeat mode">
@@ -47,7 +47,10 @@
           Restart at chatgpt.com after each completed batch
         </label>
         <textarea id="repeatMessage" placeholder="Repeat message for this tab"></textarea>
-        <button id="saveRepeat" class="secondary" type="button">Save repeat settings</button>
+        <div class="row">
+          <button id="saveRepeat" class="secondary" type="button">Save repeat settings</button>
+          <button id="sendMessage" class="primary" type="button">Send message</button>
+        </div>
       </div>
     </div>
   </section>

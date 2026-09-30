@@ -4,7 +4,6 @@
   const HEARTBEAT_MS = 10000;
   const MONITOR_THROTTLE_MS = 500;
   const COMPOSER_READY_TIMEOUT_MS = 20000;
-  const SEND_READY_TIMEOUT_MS = 5000;
   // ChatGPT tool calls and long model responses can legitimately take more
   // than a few seconds. Keep an assignment alive long enough for those turns
   // to produce their final FLEET_STATUS marker.
@@ -445,7 +444,7 @@
     return `${value.length}:${(hash >>> 0).toString(16)}`;
   }
 
-  function waitForSendButton(timeoutMs = SEND_READY_TIMEOUT_MS) {
+  function waitForSendButton(timeoutMs) {
     const immediate = findSendButton();
     if (immediate && enabledButton(immediate)) return Promise.resolve(immediate);
 
@@ -473,9 +472,7 @@
     });
   }
 
-  async function injectPrompt(text) {
-    if (isStreaming()) throw new Error('ChatGPT tab is already busy');
-
+  async function injectPrompt(text, sendReadyTimeoutMs) {
     const editor = await waitForComposer();
     if (!editor) throw new Error('ChatGPT prompt composer was not found');
 
@@ -489,14 +486,18 @@
       if (!written) throw new Error('ChatGPT rejected the programmatic composer write');
     }
 
-    const sendButton = await waitForSendButton();
+    const sendButton = await waitForSendButton(sendReadyTimeoutMs);
     if (!sendButton || !usable(sendButton) || !enabledButton(sendButton)) {
       throw new Error('ChatGPT composer accepted the text, but the Send button never became enabled');
     }
+
+    const baseline = latestAssistantSnapshot(true);
+    const sentAt = Date.now();
     sendButton.click();
+    return { baseline, baselineText: baseline.text, sentAt };
   }
 
-  function stopMonitor() {
+  function stopResponseMonitor() {
     if (monitorSettleTimer !== null) {
       clearTimeout(monitorSettleTimer);
       monitorSettleTimer = null;
@@ -513,13 +514,17 @@
       clearInterval(monitorWatchdogTimer);
       monitorWatchdogTimer = null;
     }
+    monitorCheckRunning = false;
+    monitorCheckQueued = false;
+    lastMonitorCheckAt = 0;
+  }
+
+  function stopMonitor() {
+    stopResponseMonitor();
     if (monitorHardTimeoutTimer !== null) {
       clearTimeout(monitorHardTimeoutTimer);
       monitorHardTimeoutTimer = null;
     }
-    monitorCheckRunning = false;
-    monitorCheckQueued = false;
-    lastMonitorCheckAt = 0;
   }
 
   function requestMonitorCheck() {
@@ -560,8 +565,22 @@
     }, FALLBACK_SETTLE_MS + 50);
   }
 
+  function armHardAssignmentTimeout() {
+    if (!active || monitorHardTimeoutTimer !== null) return;
+    const assignmentId = active.assignment.id;
+    const startedAt = Number(active.acceptedAt || active.sentAt || Date.now());
+    const remaining = Math.max(0, HARD_ASSIGNMENT_TIMEOUT_MS - (Date.now() - startedAt));
+    monitorHardTimeoutTimer = setTimeout(() => {
+      monitorHardTimeoutTimer = null;
+      if (!active || active.assignment.id !== assignmentId) return;
+      cancelCurrent(AUTO_RECOVERY_REASON_PREFIX + 'hard 15-minute assignment limit exceeded').catch((error) => {
+        console.warn('[model-fleet] hard assignment timeout cancellation failed', error);
+      });
+    }, remaining);
+  }
+
   function startMonitor() {
-    stopMonitor();
+    stopResponseMonitor();
     const root = document.body || document.documentElement;
     if (root) {
       monitorObserver = new MutationObserver((mutations) => {
@@ -580,17 +599,7 @@
     monitorWatchdogTimer = setInterval(() => {
       requestMonitorCheck();
     }, WATCHDOG_INTERVAL_MS);
-    if (active) {
-      const assignmentId = active.assignment.id;
-      const remaining = Math.max(0, HARD_ASSIGNMENT_TIMEOUT_MS - (Date.now() - active.sentAt));
-      monitorHardTimeoutTimer = setTimeout(() => {
-        monitorHardTimeoutTimer = null;
-        if (!active || active.assignment.id !== assignmentId) return;
-        cancelCurrent(AUTO_RECOVERY_REASON_PREFIX + 'hard 15-minute assignment limit exceeded').catch((error) => {
-          console.warn('[model-fleet] hard assignment timeout cancellation failed', error);
-        });
-      }, remaining);
-    }
+    armHardAssignmentTimeout();
     requestMonitorCheck();
   }
 
@@ -666,7 +675,7 @@
   }
 
   async function monitorActive() {
-    if (!active) return;
+    if (!active || active.phase !== 'running') return;
     const nowAt = Date.now();
     const streaming = isStreaming();
     if (streaming) {
@@ -715,33 +724,58 @@
     // It stops a stuck ChatGPT turn and routes it through bounded recovery.
   }
 
+  async function prepareAndSendActive(assignmentId) {
+    const current = active;
+    if (!current || current.assignment.id !== assignmentId || current.phase !== 'preparing') return;
+    try {
+      const remaining = Math.max(1, HARD_ASSIGNMENT_TIMEOUT_MS - (Date.now() - current.acceptedAt));
+      const sent = await injectPrompt(current.assignment.prompt, remaining);
+      if (!active || active.assignment.id !== assignmentId || active.phase !== 'preparing') return;
+
+      latestAssistantNodeCache = null;
+      active.phase = 'running';
+      active.sentAt = sent.sentAt;
+      active.baselineFingerprint = sent.baseline.fingerprint;
+      active.lastFingerprint = sent.baseline.fingerprint;
+      active.lastText = sent.baselineText;
+      active.lastChangeAt = sent.sentAt;
+      active.lastProgressAt = sent.sentAt;
+      active.textDirty = true;
+      startMonitor();
+    } catch (error) {
+      if (!active || active.assignment.id !== assignmentId) return;
+      await cancelCurrent(AUTO_RECOVERY_REASON_PREFIX + 'pre-send preparation failed: ' + String(error));
+    }
+  }
+
   async function executeAssignment(assignment) {
     if (!assignment?.id || !assignment.prompt) throw new Error('invalid assignment');
     if (active) throw new Error(`worker already has assignment ${active.assignment.id}`);
     if (pendingCompletion) throw new Error(`worker is recovering completion ${pendingCompletion.assignmentId}`);
 
-    const baseline = latestAssistantSnapshot(true);
-    const baselineText = baseline.text;
-    const sentAt = Date.now();
-    await injectPrompt(assignment.prompt);
-    latestAssistantNodeCache = null;
-    registered = true;
-    startHeartbeat();
+    const acceptedAt = Date.now();
     active = {
       assignment,
-      sentAt,
-      baselineFingerprint: baseline.fingerprint,
-      lastFingerprint: baseline.fingerprint,
-      lastText: baselineText,
-      lastChangeAt: sentAt,
-      lastProgressAt: sentAt,
+      phase: 'preparing',
+      acceptedAt,
+      sentAt: 0,
+      baselineFingerprint: '',
+      lastFingerprint: '',
+      lastText: '',
+      lastChangeAt: acceptedAt,
+      lastProgressAt: acceptedAt,
       sawStreaming: false,
-      textDirty: true,
+      textDirty: false,
       responseChanged: false,
       explicitTerminal: false,
     };
-    startMonitor();
-    return { assignmentId: assignment.id };
+    registered = true;
+    startHeartbeat();
+    armHardAssignmentTimeout();
+    prepareAndSendActive(assignment.id).catch((error) => {
+      console.warn('[model-fleet] assignment preparation failed', error);
+    });
+    return { assignmentId: assignment.id, phase: 'preparing' };
   }
 
   async function cancelCurrent(reason = 'cancelled') {

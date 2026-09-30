@@ -27,7 +27,7 @@ test('streaming guard requires a visible usable Stop control', () => {
 test('every assignment attempt has a hard fifteen-minute ceiling', () => {
   assert.match(worker, /const HARD_ASSIGNMENT_TIMEOUT_MS = 15 \* 60 \* 1000/);
   assert.match(worker, /monitorHardTimeoutTimer = setTimeout/);
-  assert.match(worker, /HARD_ASSIGNMENT_TIMEOUT_MS - \(Date\.now\(\) - active\.sentAt\)/);
+  assert.match(worker, /const startedAt = Number\(active\.acceptedAt \|\| active\.sentAt \|\| Date\.now\(\)\)/);
   assert.match(worker, /hard 15-minute assignment limit exceeded/);
   assert.match(worker, /cancelCurrent\(AUTO_RECOVERY_REASON_PREFIX/);
 });
