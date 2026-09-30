@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>ChatGPT Suffix Injector Settings</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 24px;
+        max-width: 860px;
+      }
+      textarea {
+        width: 100%;
+        min-height: 220px;
+        font-family: monospace;
+        font-size: 14px;
+        box-sizing: border-box;
+      }
+      .row {
+        margin-top: 12px;
+      }
+      #status {
+        margin-left: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>ChatGPT Suffix Injector</h1>
+    <p>Edit the text appended to each outbound ChatGPT message.</p>
+    <textarea id="appendText"></textarea>
+    <div class="row">
+      <button id="save" type="button">Save</button>
+      <button id="reset" type="button">Reset</button>
+      <span id="status"></span>
+    </div>
+    <script src="options.js"></script>
+  </body>
+</html>
