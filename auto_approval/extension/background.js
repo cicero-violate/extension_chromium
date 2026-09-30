@@ -13,6 +13,7 @@ const WORKER_WAKE_TIMEOUT_MS = 20000;
 const WORKER_BRIDGE_RETRY_MS = 250;
 const FLEET_PAGE_BUSY_RECHECK_MS = 5000;
 const MAX_AUTO_RECOVERY_ATTEMPTS = 1;
+const MAX_PROTOCOL_REPAIR_ATTEMPTS = 1;
 const AUTO_RECOVERY_REASON_PREFIX = 'auto-recovery: ';
 const LEGACY_SLEEP_PAGE_URL = chrome.runtime.getURL('sleep.html');
 const WARM_IDLE_ALARM_PREFIX = 'model-fleet:warm-idle:';
@@ -1002,15 +1003,26 @@ function parseFleetOutput(text) {
   }
   const statusMatch = source.match(/\[\s*FLEET_STATUS\b[^\]]*?\bstate\s*=\s*(?:"(done|blocked)"|'(done|blocked)'|(done|blocked))\s*\]([\s\S]*?)\[\s*\/\s*FLEET_STATUS\s*\]/i);
   const statusState = statusMatch ? (statusMatch[1] || statusMatch[2] || statusMatch[3]) : null;
+  const markerPresent = /\[\s*\/?\s*FLEET_MESSAGE\b/i.test(source);
   return {
     state: statusState ? statusState.toLowerCase() : 'done',
     statusNote: statusMatch ? String(statusMatch[4] || '').trim() : '',
     messages,
-    markerPresent: /\[\s*FLEET_MESSAGE\b/i.test(source),
+    markerPresent,
+    malformedMessageEnvelope: markerPresent && messages.length === 0,
   };
 }
 
-function queueSemanticMessage(state, { fromWorkerId = null, from = null, toWorkerId, body, taskId = null }) {
+function queueSemanticMessage(state, {
+  fromWorkerId = null,
+  from = null,
+  toWorkerId,
+  body,
+  taskId = null,
+  requiresFleetMessage = false,
+  protocolRepairOf = null,
+  protocolRepairAttempts = 0,
+}) {
   const id = `M-${state.nextMessage++}`;
   const message = {
     id,
@@ -1027,6 +1039,9 @@ function queueSemanticMessage(state, { fromWorkerId = null, from = null, toWorke
     response: '',
     autoRecoveryAttempts: 0,
     lastAutoRecoveryReason: '',
+    requiresFleetMessage: requiresFleetMessage === true,
+    protocolRepairOf,
+    protocolRepairAttempts: Number(protocolRepairAttempts || 0),
   };
   state.messages.push(message);
   if (state.messages.length > MAX_MESSAGES) state.messages.splice(0, state.messages.length - MAX_MESSAGES);
@@ -1035,35 +1050,102 @@ function queueSemanticMessage(state, { fromWorkerId = null, from = null, toWorke
 }
 
 function routeParsedMessages(state, fromWorkerId, parsed, taskId) {
+  const result = { queued: [], failures: [] };
   for (const item of parsed.messages) {
     const target = item.to;
     if (target === fromWorkerId) {
       appendJournal(state, 'message.self_dropped', `${fromWorkerId} attempted to route a message to itself`, { taskId });
+      result.failures.push({ target, body: item.body, reason: 'recipient resolves to the sending worker itself' });
       continue;
     }
     if (target === 'operator' || target === 'scheduler') {
-      queueSemanticMessage(state, { fromWorkerId, toWorkerId: 'operator', body: item.body, taskId });
+      const queued = queueSemanticMessage(state, { fromWorkerId, toWorkerId: 'operator', body: item.body, taskId });
+      result.queued.push(queued.id);
       continue;
     }
     if (target === 'broadcast') {
+      let broadcastCount = 0;
       for (const worker of Object.values(state.workers)) {
         if (worker.enabled && worker.id !== fromWorkerId) {
-          queueSemanticMessage(state, { fromWorkerId, toWorkerId: worker.id, body: item.body, taskId });
+          const queued = queueSemanticMessage(state, { fromWorkerId, toWorkerId: worker.id, body: item.body, taskId });
+          result.queued.push(queued.id);
+          broadcastCount += 1;
         }
+      }
+      if (!broadcastCount) {
+        result.failures.push({ target, body: item.body, reason: 'no enabled peer recipients are available for broadcast' });
       }
       continue;
     }
-    if (state.workers[target]) {
-      queueSemanticMessage(state, { fromWorkerId, toWorkerId: target, body: item.body, taskId });
+    if (state.workers[target]?.enabled) {
+      const queued = queueSemanticMessage(state, { fromWorkerId, toWorkerId: target, body: item.body, taskId });
+      result.queued.push(queued.id);
     } else {
-      queueSemanticMessage(state, {
-        fromWorkerId,
-        toWorkerId: 'operator',
-        body: `Undeliverable message intended for ${target}:\n\n${item.body}`,
-        taskId,
-      });
+      appendJournal(state, 'message.route_failed', `${fromWorkerId} produced an unroutable peer target ${target}`, { taskId });
+      result.failures.push({ target, body: item.body, reason: 'recipient is not a currently enabled registered worker' });
     }
   }
+  return result;
+}
+
+function protocolRepairReason(parsed, routeResult, sourceMessage) {
+  if (sourceMessage?.requiresFleetMessage && routeResult.queued.length === 0) {
+    return 'This routing-format retry still produced no valid routed FLEET_MESSAGE.';
+  }
+  if (parsed.malformedMessageEnvelope) {
+    return 'Your response contained a FLEET_MESSAGE marker, but no complete valid envelope with recipient and body could be parsed.';
+  }
+  if (routeResult.failures.length) {
+    return routeResult.failures
+      .map((failure) => `Failed target ${failure.target}: ${failure.reason}`)
+      .join('\n');
+  }
+  return '';
+}
+
+function queueProtocolRepair(state, {
+  workerId,
+  failedAssignmentId,
+  taskId,
+  sourceMessage,
+  reason,
+  routeFailures,
+}) {
+  const used = Number(sourceMessage?.protocolRepairAttempts || 0);
+  if (used >= MAX_PROTOCOL_REPAIR_ATTEMPTS) return null;
+
+  const failedOnly = routeFailures.length
+    ? routeFailures.map((failure) => `- intended target: ${failure.target}\n  message: ${String(failure.body || '').trim()}`).join('\n')
+    : '- Recover the intended peer recipient and message from your immediately previous response.';
+
+  const body = [
+    'FLEET ROUTING FORMAT RETRY.',
+    `Your previous completion (${failedAssignmentId}) finished the underlying work, but required peer delivery was not durably routed.`,
+    `Reason: ${reason}`,
+    '',
+    'Do NOT redo the underlying task or analysis.',
+    'Re-emit ONLY the peer delivery that failed routing. Do not resend any peer message that was already accepted.',
+    'Use one complete envelope per delivery with an exact currently registered W-... recipient:',
+    '[FLEET_MESSAGE to="W-123"]',
+    'message body',
+    '[/FLEET_MESSAGE]',
+    '',
+    'Failed delivery context:',
+    failedOnly,
+    '',
+    'End with exactly one FLEET_STATUS envelope after the repaired peer message(s).',
+    'If the correct recipient cannot be determined from the registered peer list and your immediately previous response, use state="blocked" and explain why.',
+  ].join('\n');
+
+  return queueSemanticMessage(state, {
+    from: 'scheduler',
+    toWorkerId: workerId,
+    body,
+    taskId,
+    requiresFleetMessage: true,
+    protocolRepairOf: failedAssignmentId,
+    protocolRepairAttempts: used + 1,
+  });
 }
 
 function chooseDispatches(state) {
@@ -1374,6 +1456,50 @@ async function completeAssignment(senderTabId, payload) {
 
     const finishedTaskId = worker.currentTaskId;
     const finishedMessageId = worker.currentMessageId;
+    const sourceMessage = finishedMessageId
+      ? state.messages.find((message) => message.id === finishedMessageId)
+      : null;
+
+    const routeResult = routeParsedMessages(state, workerId, parsed, finishedTaskId || null);
+    const repairReason = protocolRepairReason(parsed, routeResult, sourceMessage);
+    let repairMessage = null;
+    let repairExhausted = false;
+
+    if (repairReason) {
+      repairMessage = queueProtocolRepair(state, {
+        workerId,
+        failedAssignmentId: payload.assignmentId,
+        taskId: finishedTaskId || sourceMessage?.taskId || null,
+        sourceMessage,
+        reason: repairReason,
+        routeFailures: routeResult.failures,
+      });
+      repairExhausted = !repairMessage && sourceMessage?.requiresFleetMessage === true;
+
+      appendJournal(
+        state,
+        repairMessage ? 'assignment.protocol_repair_queued' : 'assignment.protocol_repair_exhausted',
+        repairMessage
+          ? `${payload.assignmentId}: peer routing failed; queued ${repairMessage.id} back to ${workerId}`
+          : `${payload.assignmentId}: peer routing repair exhausted for ${workerId}`,
+        {
+          workerId,
+          taskId: finishedTaskId || null,
+          messageId: finishedMessageId || null,
+          reason: repairReason,
+          repairMessageId: repairMessage?.id || null,
+        },
+      );
+
+      if (repairExhausted) {
+        queueSemanticMessage(state, {
+          from: 'scheduler',
+          toWorkerId: 'operator',
+          body: `Fleet peer-routing repair failed for ${workerId} (${payload.assignmentId}).\n\n${repairReason}`,
+          taskId: finishedTaskId || sourceMessage?.taskId || null,
+        });
+      }
+    }
 
     if (finishedTaskId) {
       const task = state.tasks[finishedTaskId];
@@ -1381,7 +1507,9 @@ async function completeAssignment(senderTabId, payload) {
         task.status = parsed.state === 'blocked' ? 'blocked' : 'done';
         task.completedAt = now();
         task.result = responseText;
-        task.statusNote = parsed.statusNote;
+        task.statusNote = repairMessage
+          ? `peer routing repair queued as ${repairMessage.id}`
+          : parsed.statusNote;
         appendJournal(state, `task.${task.status}`, `${task.id} ${task.status} by ${workerId}`);
       }
     }
@@ -1389,19 +1517,29 @@ async function completeAssignment(senderTabId, payload) {
     if (finishedMessageId) {
       const message = state.messages.find((m) => m.id === finishedMessageId);
       if (message?.assignmentId === payload.assignmentId) {
-        message.status = 'done';
+        message.status = repairExhausted ? 'blocked' : 'done';
         message.completedAt = now();
         message.response = responseText;
-        appendJournal(state, 'message.completed', `${message.id} handled by ${workerId}`);
+        if (repairMessage) message.protocolRepairMessageId = repairMessage.id;
+        appendJournal(
+          state,
+          repairExhausted ? 'message.protocol_repair_failed' : 'message.completed',
+          repairExhausted
+            ? `${message.id} exhausted peer-routing repair at ${workerId}`
+            : `${message.id} handled by ${workerId}`,
+        );
       }
     }
 
-    routeParsedMessages(state, workerId, parsed, finishedTaskId || null);
     appendJournal(state, 'assignment.parsed', `${payload.assignmentId}: ${parsed.messages.length} semantic message(s), marker=${parsed.markerPresent ? 'yes' : 'no'}, state=${parsed.state}`, {
       workerId,
       taskId: finishedTaskId || null,
       messageCount: parsed.messages.length,
       markerPresent: parsed.markerPresent,
+      malformedMessageEnvelope: parsed.malformedMessageEnvelope,
+      routedMessageCount: routeResult.queued.length,
+      routeFailureCount: routeResult.failures.length,
+      protocolRepairMessageId: repairMessage?.id || null,
     });
     worker.currentAssignmentId = null;
     worker.currentTaskId = null;
@@ -1417,6 +1555,7 @@ async function completeAssignment(senderTabId, payload) {
   schedule().catch(() => {});
   return publicSnapshot(await loadFleetState());
 }
+
 async function flushWorkerHeartbeats() {
   if (heartbeatFlushPromise) return heartbeatFlushPromise;
   const batch = new Map(liveHeartbeats);

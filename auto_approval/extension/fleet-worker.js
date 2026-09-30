@@ -11,7 +11,7 @@
   const FALLBACK_SETTLE_MS = 60000;
   const START_TIMEOUT_MS = 120000;
   const WATCHDOG_INTERVAL_MS = 60000;
-  const LONG_RUNNING_STALL_MS = 20 * 60 * 1000;
+  const HARD_ASSIGNMENT_TIMEOUT_MS = 15 * 60 * 1000;
   const AUTO_RECOVERY_REASON_PREFIX = 'auto-recovery: ';
   const COMPLETION_HANDOFF_ID = '__model_fleet_completion_handoff__';
 
@@ -25,6 +25,7 @@
   let lastMonitorCheckAt = 0;
   let monitorThrottleTimer = null;
   let monitorWatchdogTimer = null;
+  let monitorHardTimeoutTimer = null;
   let active = null;
   let pendingCompletion = readCompletionHandoff();
   let latestAssistantNodeCache = null;
@@ -518,6 +519,10 @@
       clearInterval(monitorWatchdogTimer);
       monitorWatchdogTimer = null;
     }
+    if (monitorHardTimeoutTimer !== null) {
+      clearTimeout(monitorHardTimeoutTimer);
+      monitorHardTimeoutTimer = null;
+    }
     monitorCheckRunning = false;
     monitorCheckQueued = false;
     lastMonitorCheckAt = 0;
@@ -586,6 +591,17 @@
     monitorWatchdogTimer = setInterval(() => {
       requestMonitorCheck();
     }, WATCHDOG_INTERVAL_MS);
+    if (active) {
+      const assignmentId = active.assignment.id;
+      const remaining = Math.max(0, HARD_ASSIGNMENT_TIMEOUT_MS - (Date.now() - active.sentAt));
+      monitorHardTimeoutTimer = setTimeout(() => {
+        monitorHardTimeoutTimer = null;
+        if (!active || active.assignment.id !== assignmentId) return;
+        cancelCurrent(AUTO_RECOVERY_REASON_PREFIX + 'hard 15-minute assignment limit exceeded').catch((error) => {
+          console.warn('[model-fleet] hard assignment timeout cancellation failed', error);
+        });
+      }, remaining);
+    }
     requestMonitorCheck();
   }
 
@@ -742,10 +758,8 @@
       return;
     }
 
-    const noProgressFor = nowAt - Number(active.lastProgressAt || active.sentAt);
-    if (active.sawStreaming && !active.responseChanged && noProgressFor >= LONG_RUNNING_STALL_MS) {
-      await requestAutoRecovery('long-running assignment stalled after active streaming stopped');
-    }
+    // The hard 15-minute timer is independent of streaming/progress state.
+    // It stops a stuck ChatGPT turn and routes it through bounded recovery.
   }
 
   async function executeAssignment(assignment) {
@@ -783,12 +797,16 @@
     active = null;
     stopMonitor();
 
-    const stopButton = document.querySelector('[data-testid="stop-button"]')
-      || [...document.querySelectorAll('button')].find((button) => {
-        const label = button.getAttribute('aria-label') || button.textContent || '';
-        return usable(button) && /^\s*stop\b/i.test(label);
-      });
-    if (stopButton && enabledButton(stopButton)) stopButton.click();
+    const stopButton = document.querySelector(
+      '#composer-submit-button[data-testid="stop-button"], '
+      + '#composer-submit-button[data-testid*="stop" i], '
+      + '#composer-submit-button[aria-label*="stop" i], '
+      + 'button[data-testid="stop-button"]'
+    ) || [...document.querySelectorAll('button')].find((button) => {
+      const label = button.getAttribute('aria-label') || button.textContent || '';
+      return usable(button) && /^\s*stop\b/i.test(label);
+    });
+    if (stopButton && usable(stopButton) && enabledButton(stopButton)) stopButton.click();
 
     try {
       await runtimeMessage({

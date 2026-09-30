@@ -145,9 +145,9 @@ Fix:
 - The background scheduler independently checks the target ChatGPT page before every reserved dispatch. If a live Stop control is present, the message stays queued and is not sent.
 - A deferred preflight does not consume a task attempt.
 - The scheduler now records reservation separately from actual accepted send (`message.reserved` / `task.reserved`, then `message.sent` / `task.started`).
-- A 15-minute legitimate turn is allowed to continue indefinitely while ChatGPT remains active; there is no elapsed-time cancellation while the Stop control is present.
+- Every assignment attempt has a hard 15-minute ceiling, even while ChatGPT still shows the Stop control. At the ceiling the extension clicks Stop and requests bounded automatic recovery.
 - If no response starts within 2 minutes, the assignment may be automatically recovered.
-- If generation had started, then stopped, and no observable assistant response appears for 20 minutes, the assignment may be automatically recovered.
+- The old 20-minute post-stream stall window is superseded by the hard 15-minute per-attempt ceiling.
 - Automatic recovery is bounded to one resend. A second recovery failure is terminally blocked instead of creating an infinite resend loop.
 - Unrelated DOM mutations no longer reset the one-minute quiet fallback; only an actual assistant-response change starts that settle timer.
 
@@ -164,3 +164,38 @@ Long-turn invariant:
 `ACTIVE STOP CONTROL => NO COMPLETION + NO NEW SEND`
 
 `IDLE/COMPLETE => NEXT QUEUED MESSAGE MAY DISPATCH`
+
+
+## Hard 15-minute assignment ceiling
+
+The operator chose a hard ceiling because the ChatGPT website can remain visually active while internally stalled.
+
+Policy:
+
+- One assignment attempt may run for at most 15 minutes from successful prompt submission.
+- The limit applies even if the visible Stop control is still present.
+- At 15 minutes the fleet worker clicks the current Stop control and reports an automatic-recovery cancellation.
+- The original assignment is requeued once.
+- The retry gets its own 15-minute ceiling.
+- If the retry also reaches the ceiling, recovery is exhausted and the item becomes blocked rather than being resent again.
+
+This replaces the previous unlimited-active-turn policy.
+
+## Peer-routing format repair
+
+A completed worker turn could contain evidence of an intended peer message (including a malformed or closing-only `FLEET_MESSAGE` marker) while producing zero valid routable envelopes. Previously the assignment could still close as DONE, leaving the intended peer uninformed.
+
+The routing boundary now enforces bounded repair:
+
+- opening or closing `FLEET_MESSAGE` markers are recognized as routing intent;
+- malformed envelopes with zero parsed messages are a routing failure;
+- self-targets and invalid/disabled worker targets are routing failures;
+- successfully parsed peer messages are durably queued before the source worker is released;
+- on routing failure, the scheduler sends one corrective message back to the same agent;
+- the corrective message explicitly says not to redo the underlying work and to re-emit only the failed peer delivery using exact `FLEET_MESSAGE` formatting and a registered `W-...` target;
+- the repair response itself must produce at least one valid routed fleet message;
+- one repair attempt is allowed; repair failure is then BLOCKED and surfaced to the operator instead of looping.
+
+Invariant:
+
+`PEER MESSAGE MARKER => VALID DURABLE ROUTE OR BOUNDED FORMAT-REPAIR`

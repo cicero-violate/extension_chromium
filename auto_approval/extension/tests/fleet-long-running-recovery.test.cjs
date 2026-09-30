@@ -24,12 +24,12 @@ test('streaming guard requires a visible usable Stop control', () => {
   assert.ok(worker.includes('return !!stopButton && usable(stopButton) && enabledButton(stopButton);'));
 });
 
-test('long work watchdog only recovers after twenty minutes without progress', () => {
-  assert.match(worker, /const LONG_RUNNING_STALL_MS = 20 \* 60 \* 1000/);
-  assert.match(worker, /monitorWatchdogTimer = setInterval/);
-  assert.match(worker, /active\.lastProgressAt = nowAt/);
-  assert.match(worker, /noProgressFor >= LONG_RUNNING_STALL_MS/);
-  assert.match(worker, /requestAutoRecovery\('long-running assignment stalled after active streaming stopped'\)/);
+test('every assignment attempt has a hard fifteen-minute ceiling', () => {
+  assert.match(worker, /const HARD_ASSIGNMENT_TIMEOUT_MS = 15 \* 60 \* 1000/);
+  assert.match(worker, /monitorHardTimeoutTimer = setTimeout/);
+  assert.match(worker, /HARD_ASSIGNMENT_TIMEOUT_MS - \(Date\.now\(\) - active\.sentAt\)/);
+  assert.match(worker, /hard 15-minute assignment limit exceeded/);
+  assert.match(worker, /cancelCurrent\(AUTO_RECOVERY_REASON_PREFIX/);
 });
 
 
@@ -60,4 +60,10 @@ test('automatic resend is bounded to one recovery attempt', () => {
 test('scheduler respects page busy cooldown before reserving another assignment', () => {
   assert.match(background, /Number\(w\.pageBusyUntil \|\| 0\) <= now\(\)/);
   assert.match(background, /Number\(target\.pageBusyUntil \|\| 0\) <= now\(\)/);
+});
+
+
+test('hard timeout cancellation clicks the current visible Stop control', () => {
+  assert.match(worker, /#composer-submit-button\[data-testid="stop-button"\]/);
+  assert.match(worker, /if \(stopButton && usable\(stopButton\) && enabledButton\(stopButton\)\) stopButton\.click\(\)/);
 });
