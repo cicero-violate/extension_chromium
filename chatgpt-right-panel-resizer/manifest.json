@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "ChatGPT Right Panel Resizer",
+  "version": "1.0.5",
+  "description": "Uses the exact working DevTools resizer logic, with a thin wrapper that reapplies it when ChatGPT replaces the right sidebar.",
+  "permissions": [],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://*.chatgpt.com/*",
+        "https://chat.openai.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
