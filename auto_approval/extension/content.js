@@ -1052,6 +1052,13 @@
           console.warn('[approval-hint-wasm] delivery-timeout resend exhausted; manual intervention required', { attempts: decision.attempts });
         }
         if (decision.action === 'resend') {
+          const fleetManaged = /^\[MODEL FLEET (?:ASSIGNMENT|MESSAGE)\]/.test(lastUserMessage);
+          if (fleetManaged) {
+            deliveryTimeoutRetryController.settle({ success: false });
+            console.warn('[approval-hint-wasm] fleet-managed delivery timeout left to fleet retry policy');
+            requestTick(1000);
+            return;
+          }
           repeatPending = false;
           repeatCompletionProven = false;
           const sent = await sendMessageNow(lastUserMessage);

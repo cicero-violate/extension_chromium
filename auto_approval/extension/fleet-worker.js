@@ -9,7 +9,6 @@
   // than a few seconds. Keep an assignment alive long enough for those turns
   // to produce their final FLEET_STATUS marker.
   const FALLBACK_SETTLE_MS = 60000;
-  const START_TIMEOUT_MS = 120000;
   const WATCHDOG_INTERVAL_MS = 60000;
   const HARD_ASSIGNMENT_TIMEOUT_MS = 15 * 60 * 1000;
   const AUTO_RECOVERY_REASON_PREFIX = 'auto-recovery: ';
@@ -17,7 +16,6 @@
 
   let registered = false;
   let heartbeatTimer = null;
-  let monitorStartTimer = null;
   let monitorSettleTimer = null;
   let monitorObserver = null;
   let monitorCheckRunning = false;
@@ -499,10 +497,6 @@
   }
 
   function stopMonitor() {
-    if (monitorStartTimer !== null) {
-      clearTimeout(monitorStartTimer);
-      monitorStartTimer = null;
-    }
     if (monitorSettleTimer !== null) {
       clearTimeout(monitorSettleTimer);
       monitorSettleTimer = null;
@@ -583,11 +577,6 @@
       });
     }
 
-    // One deadline for "response never started"; DOM activity drives all normal checks.
-    monitorStartTimer = setTimeout(() => {
-      monitorStartTimer = null;
-      requestMonitorCheck();
-    }, START_TIMEOUT_MS + 50);
     monitorWatchdogTimer = setInterval(() => {
       requestMonitorCheck();
     }, WATCHDOG_INTERVAL_MS);
@@ -605,33 +594,6 @@
     requestMonitorCheck();
   }
 
-  async function requestAutoRecovery(reason) {
-    if (!active || isStreaming()) return false;
-    const stalled = active;
-    active = null;
-    stopMonitor();
-    try {
-      const response = await runtimeMessage({
-        type: 'fleet:assignment-cancelled',
-        assignmentId: stalled.assignment.id,
-        reason: AUTO_RECOVERY_REASON_PREFIX + reason,
-      });
-      if (response?.ok === false) throw new Error(response.error || 'auto recovery rejected');
-      signalIdleReady(stalled.assignment.id);
-      return true;
-    } catch (error) {
-      if (extensionContextInvalidated(error)) {
-        retireInvalidatedBridge();
-        return false;
-      }
-      active = stalled;
-      active.lastProgressAt = Date.now();
-      active.textDirty = true;
-      startMonitor();
-      console.warn('[model-fleet] automatic recovery request failed; continuing original assignment', error);
-      return false;
-    }
-  }
 
   async function reportCompletionPayload(payload) {
     const response = await runtimeMessage({
@@ -726,10 +688,6 @@
         active.responseChanged = currentFingerprint !== active.baselineFingerprint && text.trim().length > 0;
         active.explicitTerminal = active.responseChanged && hasFleetTerminalMarker(text);
         if (active.responseChanged) {
-          if (monitorStartTimer !== null) {
-            clearTimeout(monitorStartTimer);
-            monitorStartTimer = null;
-          }
           if (!active.explicitTerminal) scheduleMonitorSettleCheck();
         }
       }
@@ -750,11 +708,6 @@
     if (active.responseChanged && !active.explicitTerminal && quietFor >= FALLBACK_SETTLE_MS && elapsed >= FALLBACK_SETTLE_MS) {
       console.debug("[model-fleet] completing response without explicit FLEET_STATUS after long quiet fallback");
       await finishActive(active.lastText);
-      return;
-    }
-
-    if (!active.sawStreaming && elapsed > START_TIMEOUT_MS && !active.responseChanged) {
-      await requestAutoRecovery('no model response observed before start timeout');
       return;
     }
 

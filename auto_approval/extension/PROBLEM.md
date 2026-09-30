@@ -199,3 +199,18 @@ The routing boundary now enforces bounded repair:
 Invariant:
 
 `PEER MESSAGE MARKER => VALID DURABLE ROUTE OR BOUNDED FORMAT-REPAIR`
+
+
+## Two-minute duplicate resend removed
+
+A leftover pre-15-minute recovery path still resent a fleet assignment after 120 seconds when no response/streaming state had been detected. This contradicted the hard 15-minute policy and could duplicate a still-running ChatGPT request.
+
+Fix:
+
+- the 120-second fleet start-timeout resend path was removed entirely;
+- a fleet assignment now remains owned by the same worker until completion or the hard 15-minute ceiling;
+- the generic page-level "message delivery timed out" auto-resender now refuses to resend prompts beginning with `MODEL FLEET ASSIGNMENT` or `MODEL FLEET MESSAGE`; those are exclusively governed by fleet retry policy.
+
+Invariant:
+
+`FLEET ASSIGNMENT => NO AUTOMATIC DUPLICATE SEND BEFORE 15-MINUTE HARD CEILING`
