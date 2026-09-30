@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Chat DOM Pruner</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        margin: 12px;
+        min-width: 220px;
+      }
+      h1 {
+        font-size: 14px;
+        margin: 0 0 8px;
+      }
+      label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 6px 0;
+        font-size: 12px;
+      }
+      button {
+        margin-top: 8px;
+        width: 100%;
+        padding: 6px 8px;
+        font-size: 12px;
+      }
+      .meta {
+        margin-top: 6px;
+        font-size: 11px;
+        color: #555;
+      }
+      .status {
+        margin-top: 6px;
+        font-size: 11px;
+        color: #0b5;
+        min-height: 14px;
+      }
+      .status.error {
+        color: #b00;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Chat DOM Pruner</h1>
+    <label>
+      <input id="enabled" type="checkbox" />
+      Enabled
+    </label>
+    <label>
+      <input id="debug" type="checkbox" />
+      Debug
+    </label>
+    <div class="meta">Keep last: <span id="keepLast">3</span> messages</div>
+    <button id="pruneNow" type="button">Prune now</button>
+    <div id="status" class="status"></div>
+    <script src="popup.js"></script>
+  </body>
+</html>
