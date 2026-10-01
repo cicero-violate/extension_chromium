@@ -47,18 +47,14 @@
   }
 
   function findPickerCard(document) {
-    const roots = [...document.querySelectorAll('body *')].filter((element) => {
-      if (!usable(element, document)) return false;
-      return document.defaultView.getComputedStyle(element).position === 'fixed'
-        && String(element.innerText || '').includes(CONNECTOR_NAME);
+    const cards = [...document.querySelectorAll('button')].filter((button) => {
+      if (!usable(button, document) || !enabled(button)) return false;
+      const label = `${button.getAttribute('aria-label') || ''} ${button.innerText || button.textContent || ''}`;
+      return label.includes(CONNECTOR_NAME);
     });
-    for (const root of roots) {
-      const card = [...root.querySelectorAll('button')]
-        .find((button) => usable(button, document) && enabled(button)
-          && `${button.getAttribute('aria-label') || ''} ${button.innerText || ''}`.includes(CONNECTOR_NAME));
-      if (card) return card;
-    }
-    return null;
+    if (!cards.length) return null;
+    return cards.find((button) => button.closest('[role="menu"], [role="dialog"], [data-radix-menu-content], [data-headlessui-state]'))
+      || cards[cards.length - 1];
   }
 
   async function ensureConnectorAttached(document, timeoutMs = 8000) {

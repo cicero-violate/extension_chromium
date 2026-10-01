@@ -105,3 +105,14 @@ test('fleet send verifies the full payload and attachment before clicking Send',
   assert.ok(waitButton > verify);
   assert.ok(click > waitButton);
 });
+
+
+test('picker card detection does not depend on a fixed-position ancestor', () => {
+  const attachmentSource = fs.readFileSync(path.join(root, 'connector-attachment.js'), 'utf8');
+  const start = attachmentSource.indexOf('function findPickerCard');
+  const end = attachmentSource.indexOf('async function ensureConnectorAttached', start);
+  const section = attachmentSource.slice(start, end);
+  assert.match(section, /querySelectorAll\('button'\)/);
+  assert.match(section, /label\.includes\(CONNECTOR_NAME\)/);
+  assert.doesNotMatch(section, /position === ['"]fixed['"]/);
+});
