@@ -1754,6 +1754,7 @@ function fleetProtocolText() {
     '- Emit FLEET_MESSAGE only when peer delivery is required.',
     '- Peer syntax: [FLEET_MESSAGE to="W-S0015"] message [/FLEET_MESSAGE]. The destination attribute is exactly `to`; do not rename it to `recipient`.',
     '- Use only registered worker IDs; never message yourself or duplicate a delivery to operator/scheduler unless required.',
+    '- Terminal syntax: [FLEET_STATUS state="done"] concise note [/FLEET_STATUS]. Use only done or blocked; do not emit JSON-style FLEET_STATUS.',
     '- End with exactly one FLEET_STATUS and nothing after it.',
     '- Use state="blocked" only when useful progress cannot continue; state the exact blocker.',
     '[/FLEET PROTOCOL]',
@@ -1980,12 +1981,27 @@ function parseFleetOutput(text) {
   }
 
   const statusMatch = source.match(/\[\s*FLEET_STATUS\b[^\]]*?\bstate\s*=\s*(?:"(done|blocked)"|'(done|blocked)'|(done|blocked))\s*\]([\s\S]*?)\[\s*\/\s*FLEET_STATUS\s*\]/i);
-  const statusState = statusMatch ? (statusMatch[1] || statusMatch[2] || statusMatch[3]) : null;
+  const jsonStatusMatch = statusMatch ? null : source.match(/(?:^|\n)\s*FLEET_STATUS\s*(\{[\s\S]*\})\s*$/i);
+  let jsonStatus = null;
+  if (jsonStatusMatch) {
+    try {
+      const candidate = JSON.parse(jsonStatusMatch[1]);
+      if (candidate && typeof candidate === 'object') jsonStatus = candidate;
+    } catch {
+      jsonStatus = null;
+    }
+  }
+  const rawStatusState = statusMatch
+    ? (statusMatch[1] || statusMatch[2] || statusMatch[3])
+    : String(jsonStatus?.state || '').trim().toLowerCase();
+  const statusState = rawStatusState === 'completed' ? 'done' : rawStatusState;
   const markerPresent = /\[\s*\/?\s*FLEET_MESSAGE\b/i.test(source);
   const taskMarkerPresent = /\[\s*\/?\s*FLEET_TASK\b/i.test(source);
   return {
     state: statusState ? statusState.toLowerCase() : 'done',
-    statusNote: statusMatch ? String(statusMatch[4] || '').trim() : '',
+    statusNote: statusMatch
+      ? String(statusMatch[4] || '').trim()
+      : String(jsonStatus?.detail || '').trim(),
     messages,
     tasks,
     markerPresent,

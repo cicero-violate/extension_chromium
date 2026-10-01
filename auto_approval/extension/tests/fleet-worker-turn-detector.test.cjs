@@ -60,3 +60,12 @@ test('fleet worker separates current ChatGPT prompt echo from assistant response
   assert.ok(source.includes('responseBlocks[responseBlocks.length - 1]'));
   assert.match(source, /protocol[\s\S]*examples inside the prompt can never be mistaken for outbound messages/);
 });
+
+
+test('worker treats JSON-style completed fleet status as terminal compatibility input', () => {
+  const start = source.indexOf('function hasFleetTerminalMarker');
+  const end = source.indexOf('function fingerprint', start);
+  const block = source.slice(start, end);
+  assert.match(block, /FLEET_STATUS\\s\*\\\{/);
+  assert.match(block, /done\|completed\|blocked/);
+});

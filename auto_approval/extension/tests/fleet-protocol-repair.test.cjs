@@ -77,3 +77,22 @@ test('parser tolerates recipient= alias from model output while normalizing it t
   assert.equal(context.result.messages[0].body, 'hello');
   assert.equal(context.result.malformedMessageEnvelope, false);
 });
+
+
+test('parser normalizes JSON-style completed fleet status to done', () => {
+  const normalize = section(source, 'function normalizeFleetProtocolSource', 'function parseFleetAttributes');
+  const attrs = section(source, 'function parseFleetAttributes', 'function parseFleetOutput');
+  const parse = section(source, 'function parseFleetOutput', 'function createTaskInState');
+  const context = {};
+  const sample = '[FLEET_MESSAGE to="W-S0014"]\nhello\n[/FLEET_MESSAGE]\nFLEET_STATUS {"state":"completed","detail":"sent"}';
+  vm.runInNewContext(`${normalize}\n${attrs}\n${parse}\nresult = parseFleetOutput(${JSON.stringify(sample)});`, context);
+  assert.equal(context.result.state, 'done');
+  assert.equal(context.result.statusNote, 'sent');
+  assert.equal(context.result.messages.length, 1);
+});
+
+test('fleet protocol tells agents the exact terminal envelope syntax', () => {
+  const protocol = section(source, 'function fleetProtocolText', 'function coordinatorProtocolText');
+  assert.match(protocol, /FLEET_STATUS state=/);
+  assert.match(protocol, /do not emit JSON-style FLEET_STATUS/);
+});

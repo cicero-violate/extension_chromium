@@ -548,7 +548,10 @@
 
   function hasFleetTerminalMarker(text) {
     const source = normalizeFleetProtocolSource(text);
-    return /\[\s*FLEET_STATUS\b[^\]]*?\bstate\s*=\s*(?:"(?:done|blocked)"|'(?:done|blocked)'|(?:done|blocked))\s*\][\s\S]*?\[\s*\/\s*FLEET_STATUS\s*\]\s*$/i.test(source);
+    if (/\[\s*FLEET_STATUS\b[^\]]*?\bstate\s*=\s*(?:"(?:done|blocked)"|'(?:done|blocked)'|(?:done|blocked))\s*\][\s\S]*?\[\s*\/\s*FLEET_STATUS\s*\]\s*$/i.test(source)) {
+      return true;
+    }
+    return /(?:^|\n)\s*FLEET_STATUS\s*\{[\s\S]*?"state"\s*:\s*"(?:done|completed|blocked)"[\s\S]*?\}\s*$/i.test(source);
   }
 
   function fingerprint(text) {
