@@ -914,6 +914,31 @@
     });
   }
 
+  function requiredConnectorMention(text) {
+    return /@chatgpt-mcp-tunnel|chatgpt-mcp-tunnel|asdk_app_6aa34c5f8468819180eea22fb7808dd9/i.test(String(text || ''));
+  }
+
+  function connectorAttachmentPresent() {
+    const selectors = [
+      '[data-testid*="connector" i]',
+      '[data-testid*="app" i]',
+      '[aria-label*="connector" i]',
+      '[aria-label*="app" i]',
+      '[title*="connector" i]',
+      '[title*="app" i]',
+    ];
+    for (const selector of selectors) {
+      if (document.querySelector(selector)) return true;
+    }
+    const text = String(document.body?.innerText || '');
+    return /chatgpt-mcp-tunnel|mcp connector|connected app/i.test(text);
+  }
+
+  async function ensureConnectorAttached() {
+    if (connectorAttachmentPresent()) return true;
+    return false;
+  }
+
   async function sendMessageNow(messageText, strict = false) {
     const fail = (message) => {
       if (strict) throw new Error(message);
@@ -921,6 +946,9 @@
     };
 
     const text = String(messageText || '');
+    if (requiredConnectorMention(text) && !(await ensureConnectorAttached())) {
+      return fail('Required chatgpt-mcp-tunnel attachment is missing; refusing to send text-only connector instructions.');
+    }
     const trimmed = normalizedComposerText(text);
     if (!trimmed) return fail('Message is empty.');
 
