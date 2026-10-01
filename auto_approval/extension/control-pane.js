@@ -15,10 +15,10 @@
   const $ = (id) => document.getElementById(id);
   const els = {
     healthDot: $('healthDot'), healthText: $('healthText'), pauseAll: $('pauseAll'), stopFlushStale: $('stopFlushStale'), killAll: $('killAll'),
-    goalInput: $('goalInput'), saveGoal: $('saveGoal'), workerMetric: $('workerMetric'), taskMetric: $('taskMetric'), messageMetric: $('messageMetric'),
+    goalInput: $('goalInput'), saveGoal: $('saveGoal'), workspacePathInput: $('workspacePathInput'), saveWorkspacePath: $('saveWorkspacePath'), workerMetric: $('workerMetric'), taskMetric: $('taskMetric'), messageMetric: $('messageMetric'),
     generation: $('generation'), refresh: $('refresh'), status: $('status'), roleContracts: $('roleContracts'),
     roleTargets: $('roleTargets'), topologyActual: $('topologyActual'), topologyTotal: $('topologyTotal'), reconcileFleet: $('reconcileFleet'),
-    concurrency: $('concurrency'), concurrencyValue: $('concurrencyValue'), turnLimit: $('turnLimit'), turnLimitValue: $('turnLimitValue'), authorityValue: $('authorityValue'),
+    concurrency: $('concurrency'), concurrencyValue: $('concurrencyValue'), authorityValue: $('authorityValue'),
     invariants: $('invariants'), queuePressure: $('queuePressure'), queuePressureCount: $('queuePressureCount'), exceptions: $('exceptions'), exceptionCount: $('exceptionCount'),
     taskTitle: $('taskTitle'), taskRole: $('taskRole'), taskPriority: $('taskPriority'), taskPrompt: $('taskPrompt'), taskDeps: $('taskDeps'), createTask: $('createTask'),
     tasks: $('tasks'), taskCount: $('taskCount'), workers: $('workers'), workerCount: $('workerCount'),
@@ -26,6 +26,19 @@
     traffic: $('traffic'), trafficCount: $('trafficCount'), trafficSort: $('trafficSort'), journal: $('journal'), viewTabs: $('viewTabs'), messageViewTabs: $('messageViewTabs'),
     roleTimeline: $('roleTimeline'), roleTimelineRange: $('roleTimelineRange'), roleTimelineMeta: $('roleTimelineMeta'),
   };
+
+  function loadWorkspacePath() {
+    try {
+      const value = localStorage.getItem('modelFleetControl:workspacePath') || '';
+      if (els.workspacePathInput) els.workspacePathInput.value = value;
+    } catch {}
+  }
+
+  function saveWorkspacePath() {
+    const value = els.workspacePathInput?.value?.trim() || '';
+    try { localStorage.setItem('modelFleetControl:workspacePath', value); } catch {}
+    if (els.status) els.status.textContent = value ? `Workspace path saved: ${value}` : 'Workspace path cleared';
+  }
 
   function send(type, payload = {}) {
     return new Promise((resolve, reject) => {
@@ -43,6 +56,8 @@
       '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
     })[char]);
   }
+
+  els.saveWorkspacePath?.addEventListener('click', saveWorkspacePath);
 
   function formatTime(ts) {
     if (!ts) return '—';
@@ -78,6 +93,9 @@
     const desiredRoleCounts = topology.desiredRoleCounts && typeof topology.desiredRoleCounts === 'object'
       ? topology.desiredRoleCounts
       : {};
+    const maxTurnsPerChatByRole = topology.maxTurnsPerChatByRole && typeof topology.maxTurnsPerChatByRole === 'object'
+      ? topology.maxTurnsPerChatByRole
+      : {};
     return {
       ...source,
       generation: Number.isFinite(Number(source.generation)) ? Number(source.generation) : 0,
@@ -87,12 +105,11 @@
         paused: policy.paused === true,
         authorityEnabled: policy.authorityEnabled !== false,
         maxConcurrency: Math.max(1, Math.min(64, Number(policy.maxConcurrency) || 8)),
-        maxTurnsPerChat: Math.max(1, Math.min(50, Math.trunc(Number(policy.maxTurnsPerChat) || 10))),
         activeWorkerWindows: policy.activeWorkerWindows !== false,
         warmIdleMs: Math.max(10000, Math.min(300000, Number(policy.warmIdleMs) || 60000)),
       },
       roleCatalog,
-      topology: { desiredRoleCounts },
+      topology: { desiredRoleCounts, maxTurnsPerChatByRole },
       workers,
       tasks,
       diagnostics: source.diagnostics && typeof source.diagnostics === 'object'
@@ -370,6 +387,11 @@
     }).join('');
   }
 
+  function roleTurnLimit(role) {
+    const value = Math.trunc(Number(snapshot?.topology?.maxTurnsPerChatByRole?.[String(role || 'coordinator')]));
+    return Math.max(1, Math.min(50, Number.isFinite(value) && value > 0 ? value : 10));
+  }
+
   function renderTopology() {
     const catalog = roleCatalog();
     const counts = Object.fromEntries(catalog.map((role) => [role.id, 0]));
@@ -387,12 +409,18 @@
       const target = Math.max(0, Number(desired[role.id] ?? role.defaultCount ?? 0));
       const current = Number(counts[role.id] || 0);
       const stale = Number(staleCounts[role.id] || 0);
+      const turnLimit = roleTurnLimit(role.id);
       return `<div class="role-target" data-role="${escapeHtml(role.id)}">
         <div><div class="name">${escapeHtml(role.label || role.id)}</div><div class="small">${current} live${stale ? ` · ${stale} stale` : ''}</div></div>
         <div class="role-count">${current} / ${target}</div>
         <div class="stepper">
           <button type="button" data-action="role-minus" data-role="${escapeHtml(role.id)}" aria-label="Reduce ${escapeHtml(role.label || role.id)} target">−</button>
           <button type="button" data-action="role-plus" data-role="${escapeHtml(role.id)}" aria-label="Increase ${escapeHtml(role.label || role.id)} target">+</button>
+        </div>
+        <div class="role-turn-policy">
+          <span class="small">Turns / chat</span>
+          <input type="range" min="1" max="50" value="${turnLimit}" data-action="role-turn-limit" data-role="${escapeHtml(role.id)}" aria-label="${escapeHtml(role.label || role.id)} turns per chat"/>
+          <span class="value role-turn-limit-value">${turnLimit}</span>
         </div>
       </div>`;
     }).join('');
@@ -444,7 +472,7 @@
         <div class="topline"><div><div class="name tab-name" title="${escapeHtml(workerTabTitle(worker))}">${escapeHtml(workerTabTitle(worker))}</div><div class="role">${escapeHtml(worker.id)} · ${escapeHtml(worker.role)}</div></div><span class="pill ${statusClass}">${escapeHtml(status.toUpperCase())}</span></div>
         <div class="small" style="margin-top:6px">${escapeHtml(assignment)} · ${escapeHtml(lifecycle)} · ${worker.lifecycle === 'stale' ? 'stale / unbound' : `tab ${worker.tabId ?? '—'} · window ${worker.windowId ?? '—'} · heartbeat ${age === null ? 'never' : `${age}s ago`}`}</div>
         <div class="small">Queue · ${escapeHtml(queueDetail)}</div>
-        <div class="small">Chat turns · ${Math.max(0, Number(worker.chatTurnCount || 0))} / ${snapshot.policy.maxTurnsPerChat}${worker.chatRotationPending ? ' · rotation pending' : ''}</div>
+        <div class="small">Chat turns · ${Math.max(0, Number(worker.chatTurnCount || 0))} / ${roleTurnLimit(worker.role)}${worker.chatRotationPending ? ' · rotation pending' : ''}</div>
         <div class="small" title="${escapeHtml(urlInfo.full)}">URL · ${escapeHtml(urlInfo.short)}</div>
         <div class="caps">${escapeHtml((worker.capabilities || []).join(' · '))}</div>
         <div class="worker-actions">
@@ -654,8 +682,6 @@
     els.generation.textContent = `gen ${snapshot.generation}`;
     els.concurrency.value = String(snapshot.policy.maxConcurrency || 8);
     els.concurrencyValue.textContent = String(snapshot.policy.maxConcurrency || 8);
-    els.turnLimit.value = String(snapshot.policy.maxTurnsPerChat || 10);
-    els.turnLimitValue.textContent = String(snapshot.policy.maxTurnsPerChat || 10);
     els.authorityValue.textContent = snapshot.policy.authorityEnabled ? 'ON' : 'OFF';
     els.authorityValue.style.color = snapshot.policy.authorityEnabled ? 'var(--green)' : 'var(--red)';
     els.pauseAll.textContent = snapshot.policy.paused ? 'Resume dispatch' : 'Pause dispatch';
@@ -710,6 +736,29 @@
     }).catch((error) => setStatus(String(error), true)).finally(() => { button.disabled = false; });
   });
 
+  els.roleTargets.addEventListener('input', (event) => {
+    const input = event.target.closest('input[data-action="role-turn-limit"][data-role]');
+    if (!input) return;
+    const value = input.closest('.role-target')?.querySelector('.role-turn-limit-value');
+    if (value) value.textContent = String(input.value);
+  });
+
+  els.roleTargets.addEventListener('change', (event) => {
+    const input = event.target.closest('input[data-action="role-turn-limit"][data-role]');
+    if (!input || !snapshot) return;
+    const role = input.dataset.role;
+    const limit = Math.max(1, Math.min(50, Math.trunc(Number(input.value) || 10)));
+    input.disabled = true;
+    send('fleet:set-role-turn-limit', { role, limit }).then((response) => {
+      snapshot = normalizeSnapshot(response.snapshot);
+      render();
+      setStatus(`${role} turns/chat → ${limit}`);
+    }).catch((error) => {
+      input.disabled = false;
+      setStatus(String(error), true);
+    });
+  });
+
   els.reconcileFleet.addEventListener('click', () => {
     els.reconcileFleet.disabled = true;
     setStatus('Reconciling fleet windows…');
@@ -738,8 +787,6 @@
 
   els.concurrency.addEventListener('input', () => { els.concurrencyValue.textContent = els.concurrency.value; });
   els.concurrency.addEventListener('change', () => send('fleet:update-policy', { patch: { maxConcurrency: Number(els.concurrency.value) } }).then((response) => { snapshot = normalizeSnapshot(response.snapshot); render(); setStatus('Concurrency updated'); }).catch((error) => setStatus(String(error), true)));
-  els.turnLimit.addEventListener('input', () => { els.turnLimitValue.textContent = String(els.turnLimit.value); });
-  els.turnLimit.addEventListener('change', () => send('fleet:update-policy', { patch: { maxTurnsPerChat: Number(els.turnLimit.value) } }).then((response) => { snapshot = normalizeSnapshot(response.snapshot); render(); setStatus('Turns-per-chat limit updated'); }).catch((error) => setStatus(String(error), true)));
   els.pauseAll.addEventListener('click', () => {
     if (!snapshot) return;
     send('fleet:update-policy', { patch: { paused: !snapshot.policy.paused } }).then((response) => {
@@ -890,3 +937,5 @@
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh().catch(() => {}); });
   window.addEventListener('pagehide', () => { if (refreshTimer) clearInterval(refreshTimer); });
 })();
+
+loadWorkspacePath();
