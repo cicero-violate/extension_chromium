@@ -37,6 +37,7 @@
   function saveWorkspacePath() {
     const value = els.workspacePathInput?.value?.trim() || '';
     try { localStorage.setItem('modelFleetControl:workspacePath', value); } catch {}
+    chrome.runtime.sendMessage({ type: 'fleet:set-workspace-path', workspacePath: value });
     if (els.status) els.status.textContent = value ? `Workspace path saved: ${value}` : 'Workspace path cleared';
   }
 

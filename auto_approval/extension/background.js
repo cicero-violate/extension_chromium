@@ -3482,6 +3482,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'fleet:reconcile-topology') {
     return reply(reconcileFleetTopology());
   }
+  if (message.type === 'fleet:set-workspace-path') {
+    return reply(mutateFleet((state) => {
+      state.workspacePath = String(message.workspacePath || '').trim();
+      appendJournal(state, 'workspace.path.changed', state.workspacePath || 'Workspace path cleared');
+    }).then(({ state }) => ({ snapshot: publicSnapshot(state) })));
+  }
   if (message.type === 'fleet:set-goal') {
     return reply(mutateFleet((state) => {
       state.goal = String(message.goal || '').trim();
