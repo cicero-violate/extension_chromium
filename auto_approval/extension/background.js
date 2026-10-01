@@ -2754,9 +2754,22 @@ async function completeAssignment(senderTabId, payload) {
   liveHeartbeats.delete(workerId);
   const responseText = String(payload.text || '').slice(0, MAX_RESULT_CHARS);
   const parsed = parseFleetOutput(responseText);
-  const { state } = await mutateFleet((state) => {
+  const { state, result } = await mutateFleet((state) => {
     const worker = state.workers[workerId];
-    if (!worker || worker.currentAssignmentId !== payload.assignmentId) return;
+    if (!worker) {
+      return { rejected: true, error: `worker ${workerId} is no longer registered` };
+    }
+    if (worker.currentAssignmentId !== payload.assignmentId) {
+      appendJournal(state, 'assignment.completion_mismatch', `${workerId} rejected completion for ${payload.assignmentId || 'unknown assignment'}`, {
+        workerId,
+        expectedAssignmentId: worker.currentAssignmentId || null,
+        reportedAssignmentId: payload.assignmentId || null,
+      });
+      return {
+        rejected: true,
+        error: `assignment ownership mismatch: expected ${worker.currentAssignmentId || 'none'}, received ${payload.assignmentId || 'none'}`,
+      };
+    }
 
     const finishedTaskId = worker.currentTaskId;
     const finishedMessageIds = assignmentMessageIds(worker);
@@ -2904,7 +2917,15 @@ async function completeAssignment(senderTabId, payload) {
     worker.lastResultAt = releasedAt;
     worker.progressVersion = Number(worker.progressVersion || 0) + 1;
     worker.heartbeatAt = releasedAt;
+    return { completed: true };
   });
+  if (result?.rejected) {
+    return {
+      ok: false,
+      error: result.error,
+      snapshot: publicSnapshot(state),
+    };
+  }
   const completed = await loadFleetState();
   if (completed.workers[workerId]?.chatRotationPending) {
     await rotateWorkerChat(workerId, 'turn cap reached after ' + (payload.assignmentId || 'assignment')).catch(() => {});
@@ -2928,6 +2949,35 @@ async function flushWorkerHeartbeats() {
       const worker = state.workers[workerId];
       if (!worker) continue;
       const wasBusy = worker.busy === true;
+      const hasAssignmentIdentity = Object.prototype.hasOwnProperty.call(heartbeat, 'activeAssignmentId');
+      const reportedAssignmentId = hasAssignmentIdentity
+        ? (typeof heartbeat.activeAssignmentId === 'string' ? heartbeat.activeAssignmentId.trim() : '') || null
+        : undefined;
+      const durableAssignmentId = worker.currentAssignmentId || null;
+      if (hasAssignmentIdentity && reportedAssignmentId !== durableAssignmentId) {
+        if (heartbeat.busy !== true
+          && reportedAssignmentId === null
+          && durableAssignmentId
+          && worker.lifecycle !== 'activating') {
+          const reason = `heartbeat reported idle without active assignment; released durable ${durableAssignmentId}`;
+          const released = releaseWorkerAssignment(state, workerId, durableAssignmentId, reason, {
+            requeue: true,
+            eventType: 'assignment.heartbeat_reconciled',
+          });
+          if (released) scheduleNeeded = true;
+        } else {
+          const reason = `heartbeat assignment mismatch: durable ${durableAssignmentId || 'none'}, reported ${reportedAssignmentId || 'none'}`;
+          appendJournal(state, 'assignment.heartbeat_mismatch', `${workerId} heartbeat custody mismatch`, {
+            workerId,
+            expectedAssignmentId: durableAssignmentId,
+            reportedAssignmentId,
+            busy: heartbeat.busy === true,
+          });
+          worker.status = 'blocked';
+          worker.lastDispatchError = reason;
+          worker.lastDispatchFailureAt = now();
+        }
+      }
       worker.title = heartbeat.title || worker.title;
       worker.url = heartbeat.url || worker.url;
       worker.windowId = Number.isInteger(heartbeat.windowId) ? heartbeat.windowId : worker.windowId;
@@ -2965,6 +3015,9 @@ async function updateWorkerHeartbeat(tab, payload) {
   liveHeartbeats.set(workerId, {
     at: observedAt,
     busy: payload.busy === true,
+    activeAssignmentId: Object.prototype.hasOwnProperty.call(payload, 'activeAssignmentId')
+      ? (typeof payload.activeAssignmentId === 'string' ? payload.activeAssignmentId.trim() : '') || null
+      : undefined,
     title: tab.title || "",
     url: tab.url || "",
     windowId: Number.isInteger(tab.windowId) ? tab.windowId : null,
@@ -3739,7 +3792,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message.type === 'fleet:assignment-complete') {
     if (!sender.tab?.id) return false;
-    return reply(completeAssignment(sender.tab.id, message).then((snapshot) => ({ snapshot })));
+    return reply(completeAssignment(sender.tab.id, message).then((result) => (
+      result?.ok === false ? result : { snapshot: result }
+    )));
   }
   if (message.type === 'fleet:worker-idle-ready') {
     if (!sender.tab?.id) return false;
