@@ -2659,8 +2659,9 @@ async function dispatchReserved(dispatch) {
     await mutateFleet((state) => {
       const worker = state.workers[dispatch.workerId];
       if (worker?.currentAssignmentId === dispatch.assignment.id) {
-        worker.status = 'running';
-        worker.lifecycle = 'running';
+        // Keep the reservation activating until a worker heartbeat confirms
+        // that the page owns this exact assignment. A heartbeat queued before
+        // execute-assignment acknowledgement must not be allowed to revoke it.
         worker.lastDispatchError = '';
         worker.dispatchFailureCount = 0;
         worker.lastDispatchFailureAt = 0;
@@ -2849,6 +2850,10 @@ async function completeAssignment(senderTabId, payload) {
       });
       return {
         rejected: true,
+        code: 'assignment_ownership_mismatch',
+        terminal: !worker.currentAssignmentId,
+        expectedAssignmentId: worker.currentAssignmentId || null,
+        reportedAssignmentId: payload.assignmentId || null,
         error: `assignment ownership mismatch: expected ${worker.currentAssignmentId || 'none'}, received ${payload.assignmentId || 'none'}`,
       };
     }
@@ -3004,6 +3009,10 @@ async function completeAssignment(senderTabId, payload) {
   if (result?.rejected) {
     return {
       ok: false,
+      code: result.code || 'assignment_completion_rejected',
+      terminal: result.terminal === true,
+      expectedAssignmentId: result.expectedAssignmentId ?? null,
+      reportedAssignmentId: result.reportedAssignmentId ?? payload.assignmentId ?? null,
       error: result.error,
       snapshot: publicSnapshot(state),
     };
@@ -3036,11 +3045,19 @@ async function flushWorkerHeartbeats() {
         ? (typeof heartbeat.activeAssignmentId === 'string' ? heartbeat.activeAssignmentId.trim() : '') || null
         : undefined;
       const durableAssignmentId = worker.currentAssignmentId || null;
+      const activationPending = hasAssignmentIdentity
+        && heartbeat.busy !== true
+        && reportedAssignmentId === null
+        && durableAssignmentId
+        && worker.lifecycle === 'activating';
       if (hasAssignmentIdentity && reportedAssignmentId !== durableAssignmentId) {
-        if (heartbeat.busy !== true
+        if (activationPending) {
+          // A heartbeat may have been queued before execute-assignment
+          // acknowledgement. Preserve the activating reservation until a
+          // matching heartbeat confirms page custody or dispatch fails.
+        } else if (heartbeat.busy !== true
           && reportedAssignmentId === null
-          && durableAssignmentId
-          && worker.lifecycle !== 'activating') {
+          && durableAssignmentId) {
           const reason = `heartbeat reported idle without active assignment; released durable ${durableAssignmentId}`;
           const released = releaseWorkerAssignment(state, workerId, durableAssignmentId, reason, {
             requeue: true,
@@ -3059,6 +3076,15 @@ async function flushWorkerHeartbeats() {
           worker.lastDispatchError = reason;
           worker.lastDispatchFailureAt = now();
         }
+      } else if (hasAssignmentIdentity
+        && durableAssignmentId
+        && reportedAssignmentId === durableAssignmentId
+        && heartbeat.busy === true) {
+        worker.status = 'running';
+        worker.lifecycle = 'running';
+        worker.lastDispatchError = '';
+        worker.dispatchFailureCount = 0;
+        worker.lastDispatchFailureAt = 0;
       }
       worker.title = heartbeat.title || worker.title;
       worker.url = heartbeat.url || worker.url;

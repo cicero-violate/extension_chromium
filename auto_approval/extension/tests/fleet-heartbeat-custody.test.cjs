@@ -18,7 +18,7 @@ function section(source, startText, endText) {
 test('idle heartbeat reconciles durable assignment custody and requeues work', () => {
   const heartbeat = section(background, 'async function flushWorkerHeartbeats', 'async function updateWorkerHeartbeat');
   assert.match(heartbeat, /activeAssignmentId/);
-  assert.match(heartbeat, /heartbeat\.busy !== true[\s\S]*reportedAssignmentId === null[\s\S]*durableAssignmentId[\s\S]*worker\.lifecycle !== 'activating'/);
+  assert.match(heartbeat, /else if \(heartbeat\.busy !== true[\s\S]*reportedAssignmentId === null[\s\S]*durableAssignmentId\)/);
   assert.match(heartbeat, /releaseWorkerAssignment\(state, workerId, durableAssignmentId/);
   assert.match(heartbeat, /requeue: true/);
   assert.match(heartbeat, /assignment\.heartbeat_reconciled/);
@@ -54,4 +54,25 @@ test('completion rejection is forwarded to fleet-worker as a negative acknowledg
   const handler = section(background, "if (message.type === 'fleet:assignment-complete')", "if (message.type === 'fleet:worker-idle-ready')");
   assert.match(handler, /result\?\.ok === false \? result : \{ snapshot: result \}/);
   assert.doesNotMatch(handler, /then\(\(snapshot\) => \(\{ snapshot \}\)\)/);
+});
+
+
+test('activating reservation ignores idle heartbeat until matching worker custody is confirmed', () => {
+  const heartbeat = section(background, 'async function flushWorkerHeartbeats', 'async function updateWorkerHeartbeat');
+  assert.match(heartbeat, /const activationPending = [\s\S]*worker\.lifecycle === 'activating'/);
+  assert.match(heartbeat, /if \(activationPending\) \{[\s\S]*Preserve the activating reservation/);
+  assert.match(heartbeat, /reportedAssignmentId === durableAssignmentId[\s\S]*heartbeat\.busy === true[\s\S]*worker\.status = 'running'[\s\S]*worker\.lifecycle = 'running'/);
+});
+
+test('dispatch acknowledgement does not promote custody before a confirming heartbeat', () => {
+  const dispatch = section(background, 'async function dispatchReserved', 'async function schedule');
+  assert.doesNotMatch(dispatch, /worker.lifecycle = 'running'/);
+  assert.match(dispatch, /Keep the reservation activating until a worker heartbeat confirms/);
+});
+
+test('terminal completion mismatch exposes structured stale-custody acknowledgment', () => {
+  const completion = section(background, 'async function completeAssignment', 'async function flushWorkerHeartbeats');
+  assert.match(completion, /code: 'assignment_ownership_mismatch'/);
+  assert.match(completion, /terminal: !worker\.currentAssignmentId/);
+  assert.match(completion, /expectedAssignmentId: worker\.currentAssignmentId \|\| null/);
 });

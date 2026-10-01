@@ -751,7 +751,11 @@
       recoveredAfterContextReload: payload.createdAt > 0,
       responseTerminalAt: Math.max(0, Number(payload.responseTerminalAt || 0)),
     });
-    if (response?.ok === false) throw new Error(response.error || 'completion report rejected');
+    if (response?.ok === false) {
+      const error = new Error(response.error || 'completion report rejected');
+      error.fleetResponse = response;
+      throw error;
+    }
     return response;
   }
 
@@ -779,6 +783,14 @@
       signalIdleReady(payload.assignmentId);
       return true;
     } catch (error) {
+      const rejection = error?.fleetResponse;
+      if (rejection?.terminal === true
+        && rejection?.code === 'assignment_ownership_mismatch'
+        && rejection?.expectedAssignmentId == null) {
+        clearCompletionHandoff(payload.assignmentId);
+        signalIdleReady(payload.assignmentId);
+        return true;
+      }
       if (extensionContextInvalidated(error)) retireInvalidatedBridge();
       return false;
     }
@@ -787,9 +799,6 @@
   async function finishActive(text) {
     if (!active) return;
     const completed = active;
-    active = null;
-    clearAssignmentRecoveryHint(completed.assignment.id);
-    stopMonitor();
     const responseTerminalAt = Date.now();
     const payload = {
       assignmentId: completed.assignment.id,
@@ -800,11 +809,27 @@
       createdAt: 0,
       responseTerminalAt,
     };
+    // Keep assignment identity visible to heartbeats until the background
+    // acknowledges completion. Otherwise a heartbeat can race the completion
+    // RPC and make durable custody release/requeue work prematurely.
+    pendingCompletion = payload;
+    active = null;
+    clearAssignmentRecoveryHint(completed.assignment.id);
+    stopMonitor();
     try {
       await reportCompletionPayload(payload);
       hideTransportResponse(payload.text);
+      clearCompletionHandoff(payload.assignmentId);
       signalIdleReady(payload.assignmentId);
     } catch (error) {
+      const rejection = error?.fleetResponse;
+      if (rejection?.terminal === true
+        && rejection?.code === 'assignment_ownership_mismatch'
+        && rejection?.expectedAssignmentId == null) {
+        clearCompletionHandoff(payload.assignmentId);
+        signalIdleReady(payload.assignmentId);
+        return;
+      }
       writeCompletionHandoff(completed, text, responseTerminalAt);
       if (extensionContextInvalidated(error)) {
         retireInvalidatedBridge();

@@ -69,3 +69,11 @@ test('worker treats JSON-style completed fleet status as terminal compatibility 
   assert.match(block, /FLEET_STATUS\\s\*\\\{/);
   assert.match(block, /done\|completed\|blocked/);
 });
+
+
+test('completion handoff remains busy until background acknowledgment and terminal stale custody can retire it', () => {
+  assert.match(source, /pendingCompletion = payload;[\s\S]*active = null;/);
+  assert.match(source, /await reportCompletionPayload\(payload\);[\s\S]*clearCompletionHandoff\(payload\.assignmentId\)/);
+  assert.match(source, /error\?\.fleetResponse/);
+  assert.match(source, /rejection\?\.terminal === true[\s\S]*rejection\?\.code === 'assignment_ownership_mismatch'[\s\S]*rejection\?\.expectedAssignmentId == null/);
+});
