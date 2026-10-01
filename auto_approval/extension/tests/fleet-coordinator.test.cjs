@@ -17,21 +17,23 @@ function section(startText, endText) {
   return background.slice(start, end);
 }
 
-test('Coordinator replaces Generalist while preserving legacy state migration', () => {
+test('Coordinator remains canonical while legacy planning roles migrate into it', () => {
   assert.match(background, /id: 'coordinator', label: 'Coordinator', defaultCount: 1/);
   assert.doesNotMatch(background, /id: 'generalist', label: 'Generalist'/);
-  assert.match(background, /if \(value === 'generalist'\) return 'coordinator'/);
+  const normalize = section('function normalizeRole', 'function canonicalRole');
+  assert.match(normalize, /'generalist', 'research', 'architect'/);
+  assert.match(normalize, /return 'coordinator'/);
   assert.match(background, /migratedCounts\.coordinator === undefined && migratedCounts\.generalist !== undefined/);
   assert.doesNotMatch(control, /'generalist'/);
   assert.doesNotMatch(popup, /'generalist'/);
 });
 
-test('Coordinator contract is orchestration-only and names the five-stage loop', () => {
+test('Coordinator owns planning research architecture and routing but not implementation or acceptance', () => {
   const catalog = section('const ROLE_CATALOG', 'const ROLE_IDS');
-  assert.match(catalog, /decompose goals, route work, observe results, replan the DAG, and escalate unresolved decisions/);
-  assert.match(catalog, /Workflow orchestration and child-task creation only/);
+  assert.match(catalog, /planning, research, architecture, decomposition, routing, observation, and replanning/);
+  assert.match(catalog, /Planning, research, architecture, workflow orchestration, and child-task creation/);
   assert.match(catalog, /implement specialist work/);
-  assert.match(catalog, /perform canonical integration or release/);
+  assert.match(catalog, /independent verification or canonical integration/);
 });
 
 test('scheduler has no coordinator specialist fallback', () => {
@@ -42,13 +44,13 @@ test('scheduler has no coordinator specialist fallback', () => {
   assert.match(rank, /return Number\.POSITIVE_INFINITY/);
 });
 
-test('Coordinator assignment prompt carries the explicit control loop and FLEET_TASK syntax', () => {
-  const protocol = section('function coordinatorProtocolText', 'function buildTaskPrompt');
-  for (const stage of ['DECOMPOSE', 'ROUTE', 'OBSERVE', 'REPLAN', 'ESCALATE']) {
-    assert.match(protocol, new RegExp(stage));
+test('Coordinator assignment prompt carries compact routing and FLEET_TASK syntax', () => {
+  const protocol = section('function coordinatorProtocolText', 'function currentControlNotices');
+  for (const phrase of ['Decompose', 'Route implementation', 'Observe evidence', 'escalate to operator']) {
+    assert.match(protocol, new RegExp(phrase, 'i'));
   }
   assert.match(protocol, /FLEET_TASK role=/);
-  assert.match(protocol, /do not create coordinator child tasks/);
+  assert.match(protocol, /Canonical child roles: implementation, review/);
 });
 
 test('fleet output parser accepts FLEET_TASK envelopes with role title dependencies and priority', () => {
@@ -92,17 +94,17 @@ test('child-task creation failures feed back to Coordinator for replanning', () 
   assert.match(completion, /childTaskFailureCount/);
 });
 
-test('all specialist roles can report back to Coordinator', () => {
+test('both specialist roles can report back to Coordinator', () => {
   const catalog = section('const ROLE_CATALOG', 'const ROLE_IDS');
-  for (const role of ['research', 'architect', 'implementation', 'review', 'test', 'integrator']) {
+  for (const role of ['implementation', 'review']) {
     const line = catalog.split('\n').find((item) => item.includes("id: '" + role + "'"));
     assert.ok(line, 'missing role ' + role);
     assert.match(line, /allowedHandoffs: \[[^\]]*'coordinator'/);
   }
 });
 
-test('default topology remains twelve workers with one Coordinator', () => {
-  const defaults = [...background.matchAll(/defaultCount:\s*(\d+)/g)].slice(0, 7).map((m) => Number(m[1]));
-  assert.deepEqual(defaults, [1, 2, 1, 3, 2, 2, 1]);
-  assert.equal(defaults.reduce((a, b) => a + b, 0), 12);
+test('default topology is three workers with one Coordinator', () => {
+  const defaults = [...background.matchAll(/defaultCount:\s*(\d+)/g)].slice(0, 3).map((m) => Number(m[1]));
+  assert.deepEqual(defaults, [1, 1, 1]);
+  assert.equal(defaults.reduce((a, b) => a + b, 0), 3);
 });

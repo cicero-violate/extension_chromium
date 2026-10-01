@@ -25,6 +25,7 @@
     messageTarget: $('messageTarget'), messageBody: $('messageBody'), sendMessage: $('sendMessage'), allThreads: $('allThreads'), allThreadsCount: $('allThreadsCount'), allThreadsSort: $('allThreadsSort'), inbox: $('inbox'), inboxCount: $('inboxCount'), inboxSort: $('inboxSort'),
     traffic: $('traffic'), trafficCount: $('trafficCount'), trafficSort: $('trafficSort'), journal: $('journal'), viewTabs: $('viewTabs'), messageViewTabs: $('messageViewTabs'),
     roleTimeline: $('roleTimeline'), roleTimelineRange: $('roleTimelineRange'), roleTimelineMeta: $('roleTimelineMeta'),
+    connectorDiagnostics: $('connectorDiagnostics'),
   };
 
   function loadWorkspacePath() {
@@ -513,6 +514,7 @@
     }
     renderQueuePressure();
     renderInvariantsAndExceptions();
+    renderConnectorDiagnostics();
   }
 
   function renderTasks() {
@@ -645,6 +647,26 @@
     ];
   }
 
+  async function renderConnectorDiagnostics() {
+    if (!els.connectorDiagnostics) return;
+    try {
+      const report = await send('approval:get-connector-diagnostic-report');
+      const reconciliation = report.reconciliation || {};
+      const explanation = report.explanation || {};
+      els.connectorDiagnostics.innerHTML = `
+        <div class="stack">
+          <div><strong>Correlation:</strong> ${escapeHtml(report.correlationId || '—')}</div>
+          <div><strong>State:</strong> ${escapeHtml(reconciliation.state || '—')}</div>
+          <div><strong>Confidence:</strong> ${escapeHtml(reconciliation.confidence || '—')}</div>
+          <div><strong>Summary:</strong> ${escapeHtml(explanation.summary || '—')}</div>
+          <div><strong>Missing Evidence:</strong><div class="small">${escapeHtml((explanation.missingEvidence || []).join(', ') || 'None')}</div></div>
+          <div><strong>Next Probe:</strong> ${escapeHtml(explanation.nextProbe || '—')}</div>
+        </div>`;
+    } catch (error) {
+      els.connectorDiagnostics.innerHTML = `<div class="empty">${escapeHtml(String(error))}</div>`;
+    }
+  }
+
   function renderInvariantsAndExceptions() {
     const invariants = computeInvariants();
     els.invariants.innerHTML = invariants.map(([name, ok, detail]) => `<div class="invariant"><span class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '!'}</span><div>${escapeHtml(name)}<div class="small">${escapeHtml(detail)}</div></div><span class="${ok ? 'ok' : 'bad'}">${ok ? 'OK' : 'FAIL'}</span></div>`).join('');
@@ -697,6 +719,7 @@
     renderQueuePressure();
     renderJournal();
     renderInvariantsAndExceptions();
+    renderConnectorDiagnostics();
   }
 
   async function refresh() {
@@ -933,10 +956,9 @@
   try { initialMessageView = localStorage.getItem(MESSAGE_VIEW_STORAGE_KEY) || initialMessageView; } catch {}
   setMessageView(initialMessageView, false);
 
+  loadWorkspacePath();
   refresh().catch((error) => setStatus(String(error), true));
   refreshTimer = setInterval(updateHeartbeatDisplays, 5000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh().catch(() => {}); });
   window.addEventListener('pagehide', () => { if (refreshTimer) clearInterval(refreshTimer); });
 })();
-
-loadWorkspacePath();

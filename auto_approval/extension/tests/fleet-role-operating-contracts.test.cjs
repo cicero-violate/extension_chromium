@@ -29,18 +29,19 @@ test('Coordinator operating contract is closure-oriented and duplicate-resistant
   assert.match(roles, /one canonical owner\/work item per logical work family/);
   assert.match(roles, /Do not create duplicate implementation work/);
   assert.match(roles, /When Implementation is saturated, stop adding implementation work/);
-  assert.match(roles, /route it to Review\/Test/);
+  assert.match(roles, /Route implementation candidates only to Verifier \/ Integrator/);
   assert.match(roles, /repaired, regression-only, superseded/);
 });
 
-test('specialist operating contracts suppress duplicated and stale work', () => {
+test('three-role operating contracts preserve planning, implementation, and independent acceptance', () => {
   const roles = section('const ROLE_OPERATING_INSTRUCTIONS', 'const ROLE_IDS');
-  assert.match(roles, /Prefer new evidence over repeating an existing audit/);
-  assert.match(roles, /single canonical design and ownership boundary/);
+  assert.match(roles, /bounded research/);
+  assert.match(roles, /architecture, invariants, and migration design/);
   assert.match(roles, /ALREADY_REPAIRED \/ NO CHANGE/);
-  assert.match(roles, /PENDING_FINAL_REVERIFY rather than repeatedly reviewing/);
-  assert.match(roles, /stop retesting until the candidate or snapshot changes/);
+  assert.match(roles, /actively try to falsify the candidate/);
+  assert.match(roles, /PENDING_FINAL_REVERIFY/);
   assert.match(roles, /Maintain one canonical reconciled snapshot/);
+  assert.match(roles, /perform canonical integration or release/);
 });
 
 test('all assignment surfaces carry registered role operating instructions', () => {

@@ -914,29 +914,19 @@
     });
   }
 
-  function requiredConnectorMention(text) {
-    return /@chatgpt-mcp-tunnel|chatgpt-mcp-tunnel|asdk_app_6aa34c5f8468819180eea22fb7808dd9/i.test(String(text || ''));
-  }
-
   function connectorAttachmentPresent() {
-    const selectors = [
-      '[data-testid*="connector" i]',
-      '[data-testid*="app" i]',
-      '[aria-label*="connector" i]',
-      '[aria-label*="app" i]',
-      '[title*="connector" i]',
-      '[title*="app" i]',
-    ];
-    for (const selector of selectors) {
-      if (document.querySelector(selector)) return true;
-    }
-    const text = String(document.body?.innerText || '');
-    return /chatgpt-mcp-tunnel|mcp connector|connected app/i.test(text);
+    const editor = findComposer();
+    const verifier = globalThis.ModelFleetConnectorAttachment;
+    return !!editor && (verifier
+      ? verifier.connectorAttachmentPresent(editor)
+      : !!editor.querySelector('[app-mention-name="chatgpt-mcp-tunnel"][app-mention-path="app://asdk_app_6aa34c5f8468819180eea22fb7808dd9"]'));
   }
 
   async function ensureConnectorAttached() {
     if (connectorAttachmentPresent()) return true;
-    return false;
+    const verifier = globalThis.ModelFleetConnectorAttachment;
+    return !!verifier?.ensureConnectorAttached
+      && await verifier.ensureConnectorAttached(document);
   }
 
   async function sendMessageNow(messageText, strict = false) {
@@ -946,7 +936,11 @@
     };
 
     const text = String(messageText || '');
-    if (requiredConnectorMention(text) && !(await ensureConnectorAttached())) {
+    const connectorHelper = globalThis.ModelFleetConnectorAttachment;
+    if (!connectorHelper?.requiresConnector) {
+      return fail('chatgpt-mcp-tunnel attachment helper is unavailable.');
+    }
+    if (connectorHelper.requiresConnector(text) && !(await ensureConnectorAttached())) {
       return fail('Required chatgpt-mcp-tunnel attachment is missing; refusing to send text-only connector instructions.');
     }
     const trimmed = normalizedComposerText(text);

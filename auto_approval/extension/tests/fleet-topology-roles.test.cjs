@@ -11,13 +11,16 @@ const controlJs = fs.readFileSync(path.join(__dirname, '..', 'control-pane.js'),
 const popupHtml = fs.readFileSync(path.join(__dirname, '..', 'popup.html'), 'utf8');
 const popupJs = fs.readFileSync(path.join(__dirname, '..', 'popup.js'), 'utf8');
 
-test('fleet exposes seven canonical roles with a default total of twelve', () => {
-  for (const role of ['coordinator', 'research', 'architect', 'implementation', 'review', 'test', 'integrator']) {
+test('fleet exposes three canonical roles with one worker each by default', () => {
+  for (const role of ['coordinator', 'implementation', 'review']) {
     assert.match(background, new RegExp("id: '" + role + "'"));
   }
+  for (const legacyRole of ['research', 'architect', 'test', 'integrator']) {
+    assert.doesNotMatch(background, new RegExp("id: '" + legacyRole + "'"));
+  }
   const defaults = [...background.matchAll(/defaultCount:\s*(\d+)/g)].map((match) => Number(match[1]));
-  assert.deepEqual(defaults.slice(0, 7), [1, 2, 1, 3, 2, 2, 1]);
-  assert.equal(defaults.slice(0, 7).reduce((a, b) => a + b, 0), 12);
+  assert.deepEqual(defaults.slice(0, 3), [1, 1, 1]);
+  assert.equal(defaults.slice(0, 3).reduce((a, b) => a + b, 0), 3);
 });
 
 test('public snapshot is the role catalog authority for both UIs', () => {
@@ -35,6 +38,16 @@ test('scheduler requires exact role and coordinator is not a specialist fallback
   assert.doesNotMatch(background, /taskRole === 'coordinator'\) return workerRole/);
   assert.match(background, /return Number\.POSITIVE_INFINITY/);
   assert.match(background, /const taskRole = canonicalRole\(task\.role\)/);
+});
+
+test('legacy roles collapse deterministically into the three-role topology', () => {
+  const start = background.indexOf('function normalizeRole');
+  const end = background.indexOf('function canonicalRole', start);
+  const body = background.slice(start, end);
+  assert.match(body, /'research', 'architect'/);
+  assert.match(body, /return 'coordinator'/);
+  assert.match(body, /'test', 'integrator'/);
+  assert.match(body, /return 'review'/);
 });
 
 test('peer routing does not silently truncate enabled workers', () => {
@@ -91,7 +104,7 @@ test('fleet message identities include human role labels and deterministic ordin
   const identity = background.slice(identityStart, identityEnd);
   assert.ok(identityStart >= 0 && identityEnd > identityStart);
   assert.match(identity, /implementation: 'Implementor'/);
-  assert.match(identity, /integrator: 'Integrator'/);
+  assert.match(identity, /review: 'Verifier \/ Integrator'/);
   assert.match(identity, /workerRoleOrdinal\(state, worker\)/);
   assert.match(identity, /localeCompare\(String\(b\.id\).*numeric: true/);
 

@@ -81,28 +81,24 @@ test('role catalog exposes machine-readable contracts', () => {
   for (const field of ['purpose', 'claimTypes', 'authorityScope', 'prohibitedActions', 'allowedHandoffs', 'requiresIndependentVerification']) {
     assert.match(background, new RegExp(field + ':'));
   }
-  assert.match(background, /Canonical integration and release authority/);
+  assert.match(background, /canonical integration\/release/);
   assert.match(background, /roleCatalog:\s*ROLE_CATALOG\.map/);
   assert.match(controlHtml, /id="roleContracts"/);
 });
 
-test('review and test assignments require independent workers', () => {
+test('verifier / integrator assignments require an independent worker', () => {
   const gate = section('function taskBlockReason', 'function taskRunnable');
-  assert.match(gate, /\['review', 'test'\]\.includes\(taskRole\)/);
+  assert.match(gate, /taskRole === 'review'/);
   assert.match(gate, /completedByWorkerId/);
   assert.match(gate, /requires an independent worker/);
   const rank = section('function workerMatchRank', 'function workerMatches');
   assert.match(rank, /taskBlockReason\(state, task, worker\)/);
 });
 
-test('integrator tasks require verification dependencies and separation', () => {
-  const gate = section('function taskBlockReason', 'function taskRunnable');
-  assert.match(gate, /integrator tasks require at least one direct dependency/);
-  assert.match(gate, /direct review or test dependency/);
-  assert.match(gate, /independent from dependency completers/);
-  const create = section('function createTaskInState', 'function queueSemanticMessage');
-  assert.match(create, /task\.role === 'integrator'/);
-  assert.match(create, /direct review or test dependency/);
+test('legacy test and integrator roles canonicalize to review', () => {
+  const normalize = section('function normalizeRole', 'function canonicalRole');
+  assert.match(normalize, /'test', 'integrator'/);
+  assert.match(normalize, /return 'review'/);
   const handler = section("if (message.type === 'fleet:create-task')", "if (message.type === 'fleet:retry-task')");
   assert.match(handler, /createTaskInState/);
 });

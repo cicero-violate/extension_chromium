@@ -17,18 +17,20 @@ function section(startText, endText) {
   return background.slice(start, end);
 }
 
-test('fleet defaults to ten accepted turns per ChatGPT conversation', () => {
+test('fleet defaults each role to ten accepted turns per ChatGPT conversation', () => {
   assert.match(background, /const MAX_TURNS_PER_CHAT = 10/);
-  assert.match(background, /maxTurnsPerChat: MAX_TURNS_PER_CHAT/);
+  assert.match(background, /DEFAULT_ROLE_TURN_LIMITS/);
+  assert.match(background, /maxTurnsPerChatByRole: DEFAULT_ROLE_TURN_LIMITS/);
   const clamp = section('function boundedMaxTurnsPerChat', 'function warmIdleAlarmName');
   assert.match(clamp, /Math\.max\(1, Math\.min\(50/);
 });
 
-test('worker turn counters persist and normalize against current policy', () => {
+test('worker turn counters persist and normalize against the worker role limit', () => {
   const normalize = section('function normalizeFleetState', 'async function loadFleetState');
+  assert.match(normalize, /const topology = normalizeTopology\(state\.topology, storedPolicy\.maxTurnsPerChat\)/);
   assert.match(normalize, /worker\.chatTurnCount = Math\.max/);
   assert.match(normalize, /worker\.chatRotationPending = worker\.chatRotationPending === true/);
-  assert.match(normalize, /boundedMaxTurnsPerChat\(policy\.maxTurnsPerChat\)/);
+  assert.match(normalize, /maxTurnsPerChatForRole\(topology, worker\.role\)/);
   assert.match(normalize, /worker\.lastCountedAssignmentId/);
 });
 
@@ -76,12 +78,15 @@ test('idle acknowledgement cannot bypass a pending chat rotation', () => {
   assert.match(handler, /rotateWorkerChat\(workerId/);
 });
 
-test('lowering the policy limit marks workers at or above the new cap for rotation', () => {
-  const handler = section("if (message.type === 'fleet:update-policy')", "if (message.type === 'fleet:cancel-worker-dispatch')");
-  assert.match(handler, /maxTurnsPerChat/);
-  assert.match(handler, /boundedMaxTurnsPerChat/);
-  assert.match(handler, /worker\.chatTurnCount/);
-  assert.match(handler, /worker\.chatRotationPending = true/);
+test('lowering one role limit marks only that role workers at or above the new cap for rotation', () => {
+  const setter = section('async function setRoleTurnLimit', 'async function createTopologyWorker');
+  assert.match(setter, /state\.topology\.maxTurnsPerChatByRole\[normalized\] = nextLimit/);
+  assert.match(setter, /canonicalRole\(worker\.role\) !== normalized/);
+  assert.match(setter, /worker\.chatTurnCount/);
+  assert.match(setter, /worker\.chatRotationPending = true/);
+  const handler = section("if (message.type === 'fleet:set-topology-role-count')", "if (message.type === 'fleet:reconcile-topology')");
+  assert.match(handler, /fleet:set-role-turn-limit/);
+  assert.match(handler, /setRoleTurnLimit/);
 });
 
 test('pending rotations resume after browser startup and service-worker reload', () => {
@@ -90,11 +95,14 @@ test('pending rotations resume after browser startup and service-worker reload',
   assert.match(lifecycle, /service worker load/);
 });
 
-test('control page exposes configurable turns-per-chat policy and per-worker usage', () => {
-  assert.match(controlHtml, /id="turnLimit"/);
-  assert.match(controlHtml, /Turns per chat/);
-  assert.match(controlJs, /maxTurnsPerChat/);
-  assert.match(controlJs, /Turns-per-chat limit updated/);
+test('control page exposes turns-per-chat per role inside fleet topology', () => {
+  assert.doesNotMatch(controlHtml, /id="turnLimit"/);
+  assert.match(controlHtml, /role-turn-policy/);
+  assert.match(controlJs, /maxTurnsPerChatByRole/);
+  assert.match(controlJs, /data-action="role-turn-limit"/);
+  assert.match(controlJs, /fleet:set-role-turn-limit/);
+  assert.match(controlJs, /turns\/chat →/);
   assert.match(controlJs, /Chat turns/);
+  assert.match(controlJs, /roleTurnLimit\(worker\.role\)/);
   assert.match(controlJs, /rotation pending/);
 });

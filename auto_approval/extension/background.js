@@ -1,5 +1,10 @@
 'use strict';
 
+importScripts(
+  'connector-diagnostic-reconciler.js',
+  'connector-diagnostic-explainer.js'
+);
+
 const TAB_STATE_PREFIX = 'approvalTab:';
 const FLEET_STATE_KEY = 'modelFleetState:v1';
 const SUPPORTED_URL = /^https:\/\/(?:chatgpt\.com|chat\.openai\.com)\//;
@@ -48,6 +53,40 @@ const DEFAULT_POLICY = Object.freeze({
   activeWorkerWindows: true,
   warmIdleMs: DEFAULT_WARM_IDLE_MS,
 });
+
+const connectorDiagnostics = {
+  lastDomSnapshot: null,
+  updatedAt: 0,
+  tabId: null,
+  correlationId: null,
+};
+
+const connectorDiagnosticSession = {
+  id: crypto.randomUUID(),
+  createdAt: Date.now(),
+  lastEventAt: 0,
+};
+
+const mcpCorrelationEvents = {
+  lastEvent: null,
+  updatedAt: 0,
+};
+
+const diagnosticReportHelpers = {
+  reconcile: (input) => {
+    if (typeof reconcileConnectorDiagnostics === 'function') return reconcileConnectorDiagnostics(input);
+    return { state: 'INSUFFICIENT_EVIDENCE', evidence: input, confidence: 'low', missingEvidence: ['reconciler'] };
+  },
+  explain: (input) => {
+    if (typeof explainConnectorDiagnostic === 'function') return explainConnectorDiagnostic(input);
+    return { summary: 'Diagnostic explanation unavailable.', findings: [], missingEvidence: input.missingEvidence || [], nextProbe: 'Load explanation layer.' };
+  },
+};
+
+const workspaceEvidence = {
+  lastEvidence: null,
+  updatedAt: 0,
+};
 
 const ROLE_CATALOG = Object.freeze([
   Object.freeze({ id: 'coordinator', label: 'Coordinator', defaultCount: 1, purpose: 'Own planning, research, architecture, decomposition, routing, observation, and replanning for the fleet.', claimTypes: ['decomposition', 'routing', 'observation', 'replan', 'escalation', 'status', 'evidence', 'research', 'design', 'invariant', 'migration-plan'], authorityScope: 'Planning, research, architecture, workflow orchestration, and child-task creation; no implementation or independent acceptance authority.', prohibitedActions: ['implement specialist work', 'self-certify implementation', 'perform independent verification or canonical integration'], allowedHandoffs: ['coordinator', 'implementation', 'review'], requiresIndependentVerification: false }),
@@ -602,15 +641,30 @@ function roleContractPrompt(role, heading = 'Active role contract') {
 }
 
 function workerRoleOperatingPrompt(worker) {
-  const contract = roleContract(worker && worker.role);
-  return [
-    '[MODEL FLEET ROLE OPERATING CONTRACT]',
-    ...COMMON_ROLE_OPERATING_INSTRUCTIONS.map((instruction) => '- ' + instruction),
-    '',
-    'Registered role: ' + contract.label + ' (' + contract.id + ')',
-    ...(ROLE_OPERATING_INSTRUCTIONS[contract.id] || []).map((instruction) => '- ' + instruction),
-    '[/MODEL FLEET ROLE OPERATING CONTRACT]',
-  ].join('\n');
+  const role = canonicalRole(worker && worker.role);
+  const lines = ['[ROLE: ' + (ROLE_MEMBER_LABELS[role] || role) + ']'];
+  if (role === 'coordinator') {
+    lines.push(
+      '- Own planning, research, architecture, decomposition, routing, and replanning.',
+      '- Do not perform specialist implementation or independent verification.',
+      '- Keep one canonical owner per logical work family; do not reopen repaired or superseded work without new contradictory evidence.',
+      '- Child roles are implementation and review only.',
+    );
+  } else if (role === 'implementation') {
+    lines.push(
+      '- Implement only the assigned logical work family.',
+      '- Do not duplicate another active owner or self-verify/accept your implementation.',
+      '- Test incrementally and hand the candidate with exact evidence to Verifier / Integrator.',
+    );
+  } else {
+    lines.push(
+      '- Independently verify, falsify, test, and integrate the assigned candidate.',
+      '- Never verify implementation you authored; reject stale or mixed-snapshot evidence.',
+      '- On failure, return one bounded actionable defect; on success, integrate only after same-snapshot verification.',
+    );
+  }
+  lines.push('[/ROLE]');
+  return lines.join('\n');
 }
 
 function defaultCapabilities() {
@@ -1671,44 +1725,26 @@ function peerSummary(state, workerId) {
 
 function fleetProtocolText() {
   return [
-    'FLEET PROTOCOL — compliance is required, not optional.',
-    'The extension routes peer communication ONLY from explicit FLEET_MESSAGE envelopes in your final response.',
-    'If the instruction requires you to send, forward, relay, reply to, notify, delegate to, or report to another worker, a status-only response is INVALID.',
-    'For every required peer delivery, emit one complete envelope in this exact form using ASCII straight quotes:',
-    '[FLEET_MESSAGE to="W-123"]',
-    'Your natural-language message to that worker.',
-    '[/FLEET_MESSAGE]',
-    'If the instruction provides an explicit outbound FLEET_MESSAGE block to send, reproduce that outbound envelope in your response (normalizing smart/curly quotes to ASCII straight quotes) instead of merely acknowledging or summarizing it.',
-    'Never replace a required peer message with prose such as "acknowledged", "awaiting", "sent", "already dispatched", or a summary inside FLEET_STATUS.',
-    'Never send a FLEET_MESSAGE to your own worker ID.',
-    'When forwarding or replying to a peer, emit only the peer message(s) actually required by the instruction.',
-    'Do not also send the same update to="operator" or to="scheduler" unless the incoming instruction explicitly asks for an operator report or operator intervention is required.',
-    'Use to="broadcast" only when the instruction genuinely requires all enabled peers.',
-    'Do not narrate, quote, or repeat an outbound FLEET_MESSAGE outside its envelope.',
-    'After all required FLEET_MESSAGE envelopes, end with exactly one terminal status envelope:',
-    '[FLEET_STATUS state="done"]',
-    'Concise completion note.',
-    '[/FLEET_STATUS]',
-    'Use state="blocked" only when you cannot make useful progress. If a required recipient is unknown or invalid, do not invent one; use blocked and explain the routing problem in the status note.',
-    'Before finalizing, verify: (1) every required peer delivery has a FLEET_MESSAGE envelope, (2) every to= target is valid and not yourself, (3) all envelope tags are closed, (4) attributes use straight quotes, and (5) [/FLEET_STATUS] is the final text with nothing after it.',
-    'If no peer delivery is required, a status-only response is allowed.',
+    '[FLEET PROTOCOL]',
+    '- Emit FLEET_MESSAGE only when peer delivery is required.',
+    '- Use only registered worker IDs; never message yourself or duplicate a delivery to operator/scheduler unless required.',
+    '- End with exactly one FLEET_STATUS and nothing after it.',
+    '- Use state="blocked" only when useful progress cannot continue; state the exact blocker.',
+    '[/FLEET PROTOCOL]',
   ].join('\n');
 }
 
 function coordinatorProtocolText() {
   return [
-    'COORDINATOR CONTROL LOOP:',
-    '1. DECOMPOSE — create bounded specialist child tasks when the goal needs parallel work.',
-    '2. ROUTE — send explicit FLEET_MESSAGE envelopes to the relevant live specialists.',
-    '3. OBSERVE — consume peer results/evidence before changing the plan.',
-    '4. REPLAN — create follow-up child tasks when evidence changes the DAG.',
-    '5. ESCALATE — send FLEET_MESSAGE to="operator" when a decision or intervention exceeds coordinator authority.',
-    '',
-    'Only Coordinator may create child tasks. Use:',
+    '[COORDINATOR]',
+    '- Decompose only when distinct specialist work is needed; prefer refining an existing owner over creating duplicate work.',
+    '- Route implementation to Implementation and independent verification/integration to Review.',
+    '- Observe evidence before replanning; escalate to operator only when the decision exceeds Coordinator authority.',
+    '- Only Coordinator may create child tasks. Canonical child roles: implementation, review.',
     '[FLEET_TASK role="implementation" title="Bounded task title" depends="T-1,T-2" priority="0"]',
-    'Natural-language assignment for the specialist.',
+    'Natural-language assignment.',
     '[/FLEET_TASK]',
-    'The depends and priority attributes are optional. Child tasks may target research, architect, implementation, review, test, or integrator; do not create coordinator child tasks.',
+    '[/COORDINATOR]',
   ].join('\n');
 }
 
@@ -1734,6 +1770,28 @@ function controlFeedbackText(worker) {
   ].join('\n');
 }
 
+function workspaceToolInstruction(workspacePath) {
+  const repository = String(workspacePath || '').trim();
+  if (!repository) {
+    return [
+      '[WORKSPACE]',
+      'Workspace: not configured.',
+      '- Workspace-global actions may be called directly.',
+      '- Repository-scoped work is BLOCKED until a repository workspace path is configured.',
+      '- Never invent repository state.',
+      '[/WORKSPACE]',
+    ].join('\n');
+  }
+  return [
+    '[WORKSPACE]',
+    `Workspace: ${repository}`,
+    '- Workspace-global actions may be called directly.',
+    `- For repository-scoped actions, call workspace:open_context for ${repository}, then reuse its context_id.`,
+    '- Use real workspace tools; never substitute prose for a required tool call or invent repository state.',
+    '[/WORKSPACE]',
+  ].join('\n');
+}
+
 function buildTaskPrompt(state, task, worker) {
   const taskContract = ROLE_CATALOG.find((role) => role.id === canonicalRole(task.role)) || ROLE_CATALOG[0];
   const workerContract = ROLE_CATALOG.find((role) => role.id === canonicalRole(worker.role)) || ROLE_CATALOG[0];
@@ -1743,9 +1801,6 @@ function buildTaskPrompt(state, task, worker) {
     ? 'Coordinator control loop only: decompose, route, observe, replan, and escalate. Do not perform specialist implementation, review, test, architecture, research, or integration work yourself.'
     : 'Do not claim authority beyond this contract or verify work you completed yourself.';
   return [
-    '@chatgpt-mcp-tunnel',
-    '[$chatgpt-mcp-tunnel](app://asdk_app_6aa34c5f8468819180eea22fb7808dd9)',
-    '',
     '[MODEL FLEET ASSIGNMENT]',
     `Worker: ${worker.id}`,
     `Role: ${worker.role}`,
@@ -1759,7 +1814,10 @@ function buildTaskPrompt(state, task, worker) {
     `Separation of duty: ${separationNote}`,
     `Task: ${task.id} — ${task.title}`,
     state.goal ? `Fleet goal: ${state.goal}` : 'Fleet goal: not set',
-    workspacePath ? `Repository workspace path: ${workspacePath}` : 'Repository workspace path: not configured',
+    '',
+    workspaceToolInstruction(workspacePath),
+    '',
+    task.prompt,
     '',
     workerRoleOperatingPrompt(worker),
     '',
@@ -1767,16 +1825,8 @@ function buildTaskPrompt(state, task, worker) {
     controlFeedback ? '' : '',
     canonicalRole(task.role) === 'coordinator' ? coordinatorProtocolText() : '',
     canonicalRole(task.role) === 'coordinator' ? '' : '',
-    task.prompt,
     '',
     'Work independently and make concrete progress.',
-     'Repository tasks require chatgpt-mcp-tunnel availability. If connector tools are not exposed in this session, report BLOCKED before any repository reasoning.',
-    'Use the MCP connector now to obtain repository custody before any repository reasoning.',
-     'Repository tasks require chatgpt-mcp-tunnel availability. If connector tools are not exposed in this session, report BLOCKED before any repository reasoning.',
-    'Call workspace:open_context for the target repository, obtain context_id, and use that context_id for every workspace operation.',
-    'Do not claim repository access, edits, builds, tests, or patches until connector custody succeeds.',
-    'If the connector or workspace context is unavailable, report BLOCKED with the exact missing capability. Do not invent repository state or patches.',
-    'The MCP connector is the source of truth for repository state. Do not answer repository questions from memory.',
     'Do not wait for other workers unless the task genuinely depends on them.',
     '',
     'Registered peers:',
@@ -1805,14 +1855,6 @@ function buildMessagePrompt(state, messageOrMessages, worker) {
     ];
   });
   return [
-    '@chatgpt-mcp-tunnel',
-    '[$chatgpt-mcp-tunnel](app://asdk_app_6aa34c5f8468819180eea22fb7808dd9)',
-    state.workspacePath ? `Repository workspace path: ${state.workspacePath}` : 'Repository workspace path: not configured',
-    'Use the MCP connector now to obtain repository custody before any repository reasoning.',
-    'Call workspace:open_context for the target repository, obtain context_id, and use that context_id for every workspace operation.',
-    'Do not claim repository access, edits, builds, tests, or patches until connector custody succeeds.',
-    'If the connector or workspace context is unavailable, report BLOCKED with the exact missing capability. Do not invent repository state or patches.',
-    '',
     '[MODEL FLEET MESSAGE]',
     `Recipient: ${workerIdentityLabel(state, worker)}`,
     `Batch size: ${messages.length}`,
@@ -1820,20 +1862,20 @@ function buildMessagePrompt(state, messageOrMessages, worker) {
       ? 'Process every message in this batch in the listed order during this single turn. Preserve each message identity and satisfy all non-conflicting instructions; do not require one ChatGPT turn per message.'
       : 'Process the message below during this turn.',
     '',
-    workerRoleOperatingPrompt(worker),
+    workspaceToolInstruction(state.workspacePath),
     '',
     ...blocks,
     controlFeedback,
     controlFeedback ? '' : '',
     'Respond by acting on all messages in this batch.',
-     'Repository tasks require chatgpt-mcp-tunnel availability. If connector tools are not exposed in this session, report BLOCKED before any repository reasoning.',
+    '',
+    workerRoleOperatingPrompt(worker),
     '',
     canonicalRole(worker.role) === 'coordinator' ? coordinatorProtocolText() : '',
     canonicalRole(worker.role) === 'coordinator' ? '' : '',
     'Registered peer routing targets:',
     peerSummary(state, worker.id),
-    'When an instruction requires sending to another worker, use that peer exact W-... ID in the FLEET_MESSAGE to= field.',
-    'Do not guess or invent a worker ID that is not listed above.',
+    'Use only these exact worker IDs for peer delivery.',
     '',
     fleetProtocolText(),
     '[/MODEL FLEET MESSAGE]',
@@ -1842,22 +1884,18 @@ function buildMessagePrompt(state, messageOrMessages, worker) {
 
 function buildControlPrompt(state, worker) {
   return [
-    '@chatgpt-mcp-tunnel',
-    '[$chatgpt-mcp-tunnel](app://asdk_app_6aa34c5f8468819180eea22fb7808dd9)',
-    'Use the MCP connector now to obtain repository custody before any repository reasoning.',
-    'Call workspace:open_context for the target repository, obtain context_id, and use that context_id for every workspace operation.',
-    'Do not claim repository access, edits, builds, tests, or patches until connector custody succeeds.',
-    'If the connector or workspace context is unavailable, report BLOCKED with the exact missing capability. Do not invent repository state or patches.',
-    '',
     '[MODEL FLEET MESSAGE]',
     `Recipient: ${workerIdentityLabel(state, worker)}`,
     'Batch size: 0 semantic messages',
     '',
-    workerRoleOperatingPrompt(worker),
+    workspaceToolInstruction(state.workspacePath),
     '',
     controlFeedbackText(worker),
     '',
     'Act on the control feedback now. This control-plane inbox is separate from semantic peer traffic.',
+    '',
+    workerRoleOperatingPrompt(worker),
+    '',
     canonicalRole(worker.role) === 'coordinator' ? coordinatorProtocolText() : '',
     '',
     'Registered peer routing targets:',
@@ -3411,6 +3449,84 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'approval:get-own-tab-state') {
     const tabId = sender.tab?.id;
     return reply(getTabState(tabId).then((state) => ({ state, supported: Number.isInteger(tabId) })));
+  }
+  if (message.type === 'approval:connector-diagnostic') {
+    connectorDiagnosticSession.lastEventAt = Date.now();
+    connectorDiagnostics.correlationId = connectorDiagnosticSession.id;
+    connectorDiagnostics.lastDomSnapshot = message.payload;
+    connectorDiagnostics.updatedAt = Date.now();
+    connectorDiagnostics.tabId = Number.isInteger(sender.tab?.id) ? sender.tab.id : null;
+    return reply(Promise.resolve({ connectorDiagnostics }));
+  }
+  if (message.type === 'approval:get-connector-diagnostic-session') {
+    return reply(Promise.resolve({
+      correlationId: connectorDiagnosticSession.id,
+      createdAt: connectorDiagnosticSession.createdAt,
+      lastEventAt: connectorDiagnosticSession.lastEventAt,
+    }));
+  }
+  if (message.type === 'approval:mcp-custody-event') {
+    const event = message.payload || {};
+    if (!event.correlationId || !event.eventType) {
+      return reply(Promise.resolve({ ok: false, error: 'invalid_mcp_correlation_event' }));
+    }
+    mcpCorrelationEvents.lastEvent = {
+      correlationId: event.correlationId,
+      eventType: event.eventType,
+      contextId: event.contextId || null,
+      accessMode: event.accessMode || null,
+      success: event.success,
+    };
+    mcpCorrelationEvents.updatedAt = Date.now();
+    return reply(Promise.resolve({
+      event: mcpCorrelationEvents.lastEvent,
+    }));
+  }
+  if (message.type === 'approval:get-mcp-correlation-event') {
+    return reply(Promise.resolve({
+      lastEvent: mcpCorrelationEvents.lastEvent,
+      updatedAt: mcpCorrelationEvents.updatedAt,
+    }));
+  }
+  if (message.type === 'approval:workspace-evidence') {
+    const evidence = message.payload || {};
+    if (!evidence.correlationId || !evidence.contextId) {
+      return reply(Promise.resolve({ ok: false, error: 'invalid_workspace_evidence' }));
+    }
+    workspaceEvidence.lastEvidence = {
+      correlationId: evidence.correlationId,
+      contextId: evidence.contextId,
+      accessMode: evidence.accessMode || null,
+      projectRoot: evidence.projectRoot || null,
+    };
+    workspaceEvidence.updatedAt = Date.now();
+    return reply(Promise.resolve({
+      evidence: workspaceEvidence.lastEvidence,
+    }));
+  }
+  if (message.type === 'approval:get-connector-diagnostic-report') {
+    const reconciliation = diagnosticReportHelpers.reconcile({
+      frontendDiagnostic: connectorDiagnostics,
+      mcpEvent: mcpCorrelationEvents.lastEvent,
+      workspaceEvidence: workspaceEvidence.lastEvidence,
+    });
+    const explanation = diagnosticReportHelpers.explain(reconciliation);
+    return reply(Promise.resolve({
+      correlationId: reconciliation.correlationId,
+      reconciliation,
+      explanation,
+      generatedAt: Date.now(),
+    }));
+  }
+  if (message.type === 'approval:get-workspace-evidence') {
+    return reply(Promise.resolve({
+      lastEvidence: workspaceEvidence.lastEvidence,
+      updatedAt: workspaceEvidence.updatedAt,
+    }));
+  }
+
+  if (message.type === 'approval:get-connector-diagnostic') {
+    return reply(Promise.resolve({ connectorDiagnostics }));
   }
   if (message.type === 'approval:get-tab-state') {
     const tabId = message.tabId;

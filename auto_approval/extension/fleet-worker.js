@@ -205,6 +205,25 @@
     return canonicalComposerText(current) === canonicalComposerText(expected);
   }
 
+  function connectorMention(editor) {
+    const verifier = globalThis.ModelFleetConnectorAttachment;
+    if (verifier) return verifier.realConnectorMention(editor);
+    return editor?.querySelector('[app-mention-name="chatgpt-mcp-tunnel"][app-mention-path="app://asdk_app_6aa34c5f8468819180eea22fb7808dd9"]') || null;
+  }
+
+  function connectorAttachmentPresent(editor = findComposer()) {
+    return !!connectorMention(editor);
+  }
+
+  async function ensureConnectorAttached(timeoutMs = 8000) {
+    const editor = await waitForComposer(timeoutMs);
+    if (!editor) return false;
+    if (connectorAttachmentPresent(editor)) return true;
+    const verifier = globalThis.ModelFleetConnectorAttachment;
+    return !!verifier?.ensureConnectorAttached
+      && await verifier.ensureConnectorAttached(document, timeoutMs);
+  }
+
   function selectComposerContents(editor) {
     const selection = window.getSelection();
     if (!selection) return false;
@@ -286,6 +305,23 @@
       return false;
     }
     return waitForComposerText(editor, text);
+  }
+
+  async function appendComposerText(editor, text) {
+    if (canonicalComposerText(composerText(editor)).includes(canonicalComposerText(text))) return true;
+    editor.focus();
+    placeCaretAtComposerEnd(editor);
+    try {
+      document.execCommand('insertText', false, text);
+    } catch {
+    }
+    editor.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      inputType: 'insertText',
+      data: text,
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    return canonicalComposerText(composerText(editor)).includes(canonicalComposerText(text));
   }
 
   function findSendButton() {
@@ -514,12 +550,23 @@
     const editor = await waitForComposer();
     if (!editor) throw new Error('ChatGPT prompt composer was not found');
 
-    const existing = normalizedComposerText(composerText(editor));
-    if (existing && !composerTextMatches(editor, text)) {
-      throw new Error('ChatGPT composer already contains different user text; refusing to overwrite it');
+    const connectorHelper = globalThis.ModelFleetConnectorAttachment;
+    if (!connectorHelper?.connectorAttachmentPresent) {
+      throw new Error('chatgpt-mcp-tunnel attachment helper is unavailable');
+    }
+    if (!(await ensureConnectorAttached())) {
+      throw new Error('Required chatgpt-mcp-tunnel app attachment could not be proven; refusing to send without it.');
     }
 
-    if (!existing) {
+    const existing = normalizedComposerText(composerText(editor));
+    if (existing && !composerTextMatches(editor, text)) {
+      if (!connectorAttachmentPresent(editor)) {
+        throw new Error('ChatGPT composer already contains different user text; refusing to overwrite it');
+      }
+      if (!(await appendComposerText(editor, `\n\n${text}`))) {
+        throw new Error('ChatGPT app attachment was present, but the worker text could not be appended');
+      }
+    } else if (!existing) {
       const written = await writeComposerText(editor, text);
       if (!written) throw new Error('ChatGPT rejected the programmatic composer write');
     }
