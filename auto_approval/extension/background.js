@@ -1738,6 +1738,7 @@ function buildTaskPrompt(state, task, worker) {
   const taskContract = ROLE_CATALOG.find((role) => role.id === canonicalRole(task.role)) || ROLE_CATALOG[0];
   const workerContract = ROLE_CATALOG.find((role) => role.id === canonicalRole(worker.role)) || ROLE_CATALOG[0];
   const controlFeedback = controlFeedbackText(worker);
+  const workspacePath = String(state.workspacePath || '').trim();
   const separationNote = canonicalRole(task.role) === 'coordinator'
     ? 'Coordinator control loop only: decompose, route, observe, replan, and escalate. Do not perform specialist implementation, review, test, architecture, research, or integration work yourself.'
     : 'Do not claim authority beyond this contract or verify work you completed yourself.';
@@ -1804,6 +1805,7 @@ function buildMessagePrompt(state, messageOrMessages, worker) {
   return [
     '@chatgpt-mcp-tunnel',
     '[$chatgpt-mcp-tunnel](app://asdk_app_6aa34c5f8468819180eea22fb7808dd9)',
+    state.workspacePath ? `Repository workspace path: ${state.workspacePath}` : 'Repository workspace path: not configured',
     'Use the MCP connector now to obtain repository custody before any repository reasoning.',
     'Call workspace:open_context for the target repository, obtain context_id, and use that context_id for every workspace operation.',
     'Do not claim repository access, edits, builds, tests, or patches until connector custody succeeds.',
