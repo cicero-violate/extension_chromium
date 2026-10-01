@@ -41,7 +41,8 @@ test('fleet worker composer adapter matches current ChatGPT textbox and ProseMir
   assert.match(source, /textarea\[name="prompt-textarea"\]/);
   assert.match(source, /async function writeComposerText\(/);
   assert.match(source, /await waitForComposer\(\)/);
-  assert.match(source, /ChatGPT rejected the programmatic composer write/);
+  assert.match(source, /complete worker text could not be appended/);
+  assert.match(source, /failed final attachment\/payload verification/);
 });
 
 test('fleet worker canonical whitespace verification accepts ProseMirror rendering without weakening token order', () => {

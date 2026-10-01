@@ -84,3 +84,24 @@ test('missing workspace path fails closed without a placeholder target', () => {
   assert.match(context.result, /not configured/);
   assert.doesNotMatch(context.result, /Call workspace:open_context/);
 });
+
+test('fleet composer transport chunks large prompts and verifies every cumulative suffix', () => {
+  assert.match(worker, /const COMPOSER_CHUNK_CHARS = 1200;/);
+  assert.match(worker, /function nextComposerChunk\(source, offset, maxChars = COMPOSER_CHUNK_CHARS\)/);
+  assert.match(worker, /for \(let offset = 0; offset < source\.length;\)/);
+  assert.match(worker, /await waitForComposerSuffix\(currentEditor, appended\)/);
+  assert.match(worker, /connectorAttachmentPresent\(reconciledEditor\)/);
+  assert.match(worker, /composerEndsWith\(finalEditor, source\)/);
+});
+
+test('fleet send verifies the full payload and attachment before clicking Send', () => {
+  const start = worker.indexOf('async function injectPrompt(text, sendReadyTimeoutMs)');
+  const end = worker.indexOf('\n  function stopResponseMonitor', start);
+  const block = worker.slice(start, end);
+  const verify = block.indexOf("ChatGPT composer failed final attachment/payload verification; refusing to click Send");
+  const waitButton = block.indexOf('const sendButton = await waitForSendButton');
+  const click = block.indexOf('sendButton.click()');
+  assert.ok(verify >= 0);
+  assert.ok(waitButton > verify);
+  assert.ok(click > waitButton);
+});

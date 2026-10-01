@@ -31,6 +31,15 @@ test('bridge recovery iterates only enabled workers with durable live tab bindin
   assert.doesNotMatch(body, /reconcileFleetTopology/);
 });
 
+
+test('fleet bridge recovery restores connector attachment helper before dispatch', () => {
+  const helper = section(background, 'async function fleetConnectorHelperReady', 'async function ensureFleetBridge');
+  assert.match(helper, /connector-attachment\.js/);
+  assert.match(helper, /ModelFleetConnectorAttachment/);
+  const bridge = section(background, 'async function ensureFleetBridge', 'async function setFleetRecoveryHint');
+  assert.match(bridge, /await ensureFleetConnectorHelper\(tabId\)/);
+  assert.ok(bridge.indexOf('ensureFleetConnectorHelper(tabId)') < bridge.indexOf("files: ['fleet-worker.js']"));
+});
 test('background writes assignment recovery hint before fleet-worker reinjection', () => {
   const body = section(background, 'async function recoverRegisteredWorkerBridge', 'let fleetBridgeRecoveryPromise');
   const hint = body.indexOf('setFleetRecoveryHint');

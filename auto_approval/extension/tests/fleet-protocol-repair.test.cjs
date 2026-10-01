@@ -4,8 +4,17 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
+
+function section(sourceText, startText, endText) {
+  const start = sourceText.indexOf(startText);
+  const end = sourceText.indexOf(endText, start + startText.length);
+  assert.ok(start >= 0, 'missing start: ' + startText);
+  assert.ok(end > start, 'missing end: ' + endText);
+  return sourceText.slice(start, end);
+}
 
 test('closing-only or otherwise malformed fleet message markers are detectable', () => {
   assert.match(source, /const markerPresent = \/\\\[\\s\*\\\/\?\\s\*FLEET_MESSAGE\\b\/i\.test\(source\)/);
@@ -46,4 +55,25 @@ test('successful parsed deliveries remain durably queued before completion relea
   const block = source.slice(start, end);
   assert.ok(block.indexOf('routeParsedMessages(state, workerId, parsed') < block.indexOf('clearWorkerAssignmentState(worker)'));
   assert.match(block, /routedMessageCount: routeResult\.queued\.length/);
+});
+
+
+test('peer protocol shows exact to= syntax and rejects recipient= in instructions', () => {
+  const protocol = section(source, 'function fleetProtocolText', 'function coordinatorProtocolText');
+  assert.match(protocol, /FLEET_MESSAGE to=/);
+  assert.match(protocol, /destination attribute is exactly `to`/);
+  assert.match(protocol, /do not rename it to `recipient`/);
+});
+
+test('parser tolerates recipient= alias from model output while normalizing it to to', () => {
+  const normalize = section(source, 'function normalizeFleetProtocolSource', 'function parseFleetAttributes');
+  const attrs = section(source, 'function parseFleetAttributes', 'function parseFleetOutput');
+  const parse = section(source, 'function parseFleetOutput', 'function createTaskInState');
+  const context = {};
+  const sample = '[FLEET_MESSAGE recipient="W-S0015"]\nhello\n[/FLEET_MESSAGE]\n[FLEET_STATUS state="done"]ok[/FLEET_STATUS]';
+  vm.runInNewContext(`${normalize}\n${attrs}\n${parse}\nresult = parseFleetOutput(${JSON.stringify(sample)});`, context);
+  assert.equal(context.result.messages.length, 1);
+  assert.equal(context.result.messages[0].to, 'W-S0015');
+  assert.equal(context.result.messages[0].body, 'hello');
+  assert.equal(context.result.malformedMessageEnvelope, false);
 });

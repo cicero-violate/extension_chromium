@@ -785,13 +785,38 @@ async function readRepeatTurnSignal(tabId) {
   }
 }
 
+async function fleetConnectorHelperReady(tabId) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => !!globalThis.ModelFleetConnectorAttachment?.connectorAttachmentPresent
+        && !!globalThis.ModelFleetConnectorAttachment?.ensureConnectorAttached,
+    });
+    return results?.some((result) => result?.result === true) === true;
+  } catch {
+    return false;
+  }
+}
+
+async function ensureFleetConnectorHelper(tabId) {
+  if (await fleetConnectorHelperReady(tabId)) return;
+  await chrome.scripting.executeScript({ target: { tabId }, files: ['connector-attachment.js'] });
+  if (!(await fleetConnectorHelperReady(tabId))) {
+    throw new Error('fleet connector attachment helper was not available after reinjection');
+  }
+}
+
 async function ensureFleetBridge(tabId) {
   try {
     const response = await chrome.tabs.sendMessage(tabId, { type: 'fleet:bridge-ping' });
-    if (response?.ok) return response;
+    if (response?.ok) {
+      await ensureFleetConnectorHelper(tabId);
+      return response;
+    }
   } catch {
     // Inject below when the static content script is not present in an already-open tab.
   }
+  await ensureFleetConnectorHelper(tabId);
   await chrome.scripting.executeScript({ target: { tabId }, files: ['fleet-worker.js'] });
   try {
     const response = await chrome.tabs.sendMessage(tabId, { type: 'fleet:bridge-ping' });
@@ -1727,6 +1752,7 @@ function fleetProtocolText() {
   return [
     '[FLEET PROTOCOL]',
     '- Emit FLEET_MESSAGE only when peer delivery is required.',
+    '- Peer syntax: [FLEET_MESSAGE to="W-S0015"] message [/FLEET_MESSAGE]. The destination attribute is exactly `to`; do not rename it to `recipient`.',
     '- Use only registered worker IDs; never message yourself or duplicate a delivery to operator/scheduler unless required.',
     '- End with exactly one FLEET_STATUS and nothing after it.',
     '- Use state="blocked" only when useful progress cannot continue; state the exact blocker.',
@@ -1927,10 +1953,11 @@ function parseFleetAttributes(source) {
 function parseFleetOutput(text) {
   const source = normalizeFleetProtocolSource(text);
   const messages = [];
-  const messageRe = /\[\s*FLEET_MESSAGE\b[^\]]*?\bto\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s\]]+))\s*\]([\s\S]*?)\[\s*\/\s*FLEET_MESSAGE\s*\]/gi;
+  const messageRe = /\[\s*FLEET_MESSAGE\b([^\]]*)\]([\s\S]*?)\[\s*\/\s*FLEET_MESSAGE\s*\]/gi;
   for (const match of source.matchAll(messageRe)) {
-    const to = String(match[1] || match[2] || match[3] || '').trim();
-    const body = String(match[4] || '').trim();
+    const attrs = parseFleetAttributes(match[1]);
+    const to = String(attrs.to || attrs.recipient || '').trim();
+    const body = String(match[2] || '').trim();
     if (to && body) messages.push({ to, body });
   }
 

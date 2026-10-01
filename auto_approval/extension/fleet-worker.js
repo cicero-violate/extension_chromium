@@ -4,6 +4,8 @@
   const HEARTBEAT_MS = 10000;
   const MONITOR_THROTTLE_MS = 500;
   const COMPOSER_READY_TIMEOUT_MS = 20000;
+  const COMPOSER_CHUNK_CHARS = 1200;
+  const COMPOSER_CHUNK_SETTLE_TIMEOUT_MS = 2500;
   // ChatGPT tool calls and long model responses can legitimately take more
   // than a few seconds. Keep an assignment alive long enough for those turns
   // to produce their final FLEET_STATUS marker.
@@ -307,21 +309,62 @@
     return waitForComposerText(editor, text);
   }
 
-  async function appendComposerText(editor, text) {
-    if (canonicalComposerText(composerText(editor)).includes(canonicalComposerText(text))) return true;
-    editor.focus();
-    placeCaretAtComposerEnd(editor);
-    try {
-      document.execCommand('insertText', false, text);
-    } catch {
+  function composerEndsWith(editor, expectedSuffix) {
+    const current = canonicalComposerText(composerText(editor));
+    const expected = canonicalComposerText(expectedSuffix);
+    return !!expected && current.endsWith(expected);
+  }
+
+  async function waitForComposerSuffix(editor, expectedSuffix, timeoutMs = COMPOSER_CHUNK_SETTLE_TIMEOUT_MS) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const currentEditor = findComposer() || editor;
+      if (composerEndsWith(currentEditor, expectedSuffix)) return true;
+      await new Promise((resolve) => setTimeout(resolve, 25));
     }
-    editor.dispatchEvent(new InputEvent('input', {
-      bubbles: true,
-      inputType: 'insertText',
-      data: text,
-    }));
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    return canonicalComposerText(composerText(editor)).includes(canonicalComposerText(text));
+    return composerEndsWith(findComposer() || editor, expectedSuffix);
+  }
+
+  function nextComposerChunk(source, offset, maxChars = COMPOSER_CHUNK_CHARS) {
+    let end = Math.min(source.length, offset + maxChars);
+    if (end < source.length) {
+      const previous = source.charCodeAt(end - 1);
+      const next = source.charCodeAt(end);
+      if (previous >= 0xD800 && previous <= 0xDBFF && next >= 0xDC00 && next <= 0xDFFF) end -= 1;
+    }
+    return source.slice(offset, end);
+  }
+
+  async function appendComposerText(editor, text) {
+    const source = String(text || '');
+    if (!source) return true;
+    if (composerEndsWith(editor, source)) return true;
+
+    let appended = '';
+    for (let offset = 0; offset < source.length;) {
+      const chunk = nextComposerChunk(source, offset);
+      if (!chunk) return false;
+      const currentEditor = findComposer() || editor;
+      if (!currentEditor?.isConnected) return false;
+      currentEditor.focus();
+      placeCaretAtComposerEnd(currentEditor);
+      try {
+        document.execCommand('insertText', false, chunk);
+      } catch {
+      }
+      currentEditor.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        inputType: 'insertText',
+        data: chunk,
+      }));
+      appended += chunk;
+      if (!(await waitForComposerSuffix(currentEditor, appended))) return false;
+      const reconciledEditor = findComposer() || currentEditor;
+      if (!connectorAttachmentPresent(reconciledEditor)) return false;
+      offset += chunk.length;
+    }
+    const finalEditor = findComposer() || editor;
+    return composerEndsWith(finalEditor, source) && connectorAttachmentPresent(finalEditor);
   }
 
   function findSendButton() {
@@ -559,16 +602,21 @@
     }
 
     const existing = normalizedComposerText(composerText(editor));
-    if (existing && !composerTextMatches(editor, text)) {
-      if (!connectorAttachmentPresent(editor)) {
-        throw new Error('ChatGPT composer already contains different user text; refusing to overwrite it');
+    const mention = connectorMention(editor);
+    const mentionText = normalizedComposerText(mention?.innerText || mention?.textContent || 'chatgpt-mcp-tunnel');
+    const composerOnlyHasConnector = !existing
+      || canonicalComposerText(existing) === canonicalComposerText(mentionText)
+      || canonicalComposerText(existing) === 'chatgpt-mcp-tunnel';
+    if (!composerEndsWith(editor, text)) {
+      if (!composerOnlyHasConnector) {
+        throw new Error('ChatGPT composer already contains different user text; refusing to append fleet work');
       }
       if (!(await appendComposerText(editor, `\n\n${text}`))) {
-        throw new Error('ChatGPT app attachment was present, but the worker text could not be appended');
+        throw new Error('ChatGPT app attachment was present, but the complete worker text could not be appended');
       }
-    } else if (!existing) {
-      const written = await writeComposerText(editor, text);
-      if (!written) throw new Error('ChatGPT rejected the programmatic composer write');
+    }
+    if (!connectorAttachmentPresent(editor) || !composerEndsWith(editor, text)) {
+      throw new Error('ChatGPT composer failed final attachment/payload verification; refusing to click Send');
     }
 
     const sendButton = await waitForSendButton(sendReadyTimeoutMs);
