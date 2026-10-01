@@ -47,17 +47,12 @@ const DEFAULT_POLICY = Object.freeze({
   maxConcurrency: 8,
   activeWorkerWindows: true,
   warmIdleMs: DEFAULT_WARM_IDLE_MS,
-  maxTurnsPerChat: MAX_TURNS_PER_CHAT,
 });
 
 const ROLE_CATALOG = Object.freeze([
-  Object.freeze({ id: 'coordinator', label: 'Coordinator', defaultCount: 1, purpose: 'Run the fleet control loop: decompose goals, route work, observe results, replan the DAG, and escalate unresolved decisions.', claimTypes: ['decomposition', 'routing', 'observation', 'replan', 'escalation', 'status'], authorityScope: 'Workflow orchestration and child-task creation only; no specialist execution, technical acceptance, or canonical integration authority.', prohibitedActions: ['implement specialist work', 'self-certify work', 'declare implementation verified', 'perform canonical integration or release'], allowedHandoffs: ['coordinator', 'research', 'architect', 'implementation', 'review', 'test', 'integrator'], requiresIndependentVerification: false }),
-  Object.freeze({ id: 'research', label: 'Research', defaultCount: 2, purpose: 'Produce evidence, hypotheses, and source-grounded findings.', claimTypes: ['evidence', 'hypothesis', 'research'], authorityScope: 'Evidence and hypotheses only.', prohibitedActions: ['declare integration accepted', 'approve implementation'], allowedHandoffs: ['architect', 'implementation', 'review', 'test', 'coordinator'], requiresIndependentVerification: false }),
-  Object.freeze({ id: 'architect', label: 'Architect', defaultCount: 1, purpose: 'Define design, invariants, interfaces, and migration plans.', claimTypes: ['design', 'invariant', 'migration-plan'], authorityScope: 'Architecture and migration decisions.', prohibitedActions: ['self-verify implementation', 'declare implementation correct'], allowedHandoffs: ['implementation', 'review', 'test', 'coordinator'], requiresIndependentVerification: true }),
-  Object.freeze({ id: 'implementation', label: 'Implementation', defaultCount: 3, purpose: 'Develop an implementation candidate against the approved design.', claimTypes: ['implementation', 'patch', 'candidate'], authorityScope: 'Implementation changes and candidate results.', prohibitedActions: ['self-approve', 'integrate or release'], allowedHandoffs: ['review', 'test', 'coordinator'], requiresIndependentVerification: true }),
-  Object.freeze({ id: 'review', label: 'Review', defaultCount: 2, purpose: 'Independently verify correctness, architecture, and invariants.', claimTypes: ['verification', 'correctness', 'architecture-review'], authorityScope: 'Independent correctness and architecture verification.', prohibitedActions: ['verify own implementation', 'integrate or release'], allowedHandoffs: ['test', 'integrator', 'implementation', 'coordinator'], requiresIndependentVerification: true }),
-  Object.freeze({ id: 'test', label: 'Test', defaultCount: 2, purpose: 'Falsify claims with adversarial, regression, and performance evidence.', claimTypes: ['test-evidence', 'falsification', 'performance'], authorityScope: 'Independent test and falsification evidence.', prohibitedActions: ['validate own implementation', 'integrate or release'], allowedHandoffs: ['review', 'integrator', 'implementation', 'coordinator'], requiresIndependentVerification: true }),
-  Object.freeze({ id: 'integrator', label: 'Integrator', defaultCount: 1, purpose: 'Turn verified and tested dependencies into accepted release state.', claimTypes: ['integration', 'release', 'accepted-state'], authorityScope: 'Canonical integration and release authority.', prohibitedActions: ['author the implementation it integrates', 'accept unverified dependencies'], allowedHandoffs: ['coordinator', 'review', 'test'], requiresIndependentVerification: true }),
+  Object.freeze({ id: 'coordinator', label: 'Coordinator', defaultCount: 1, purpose: 'Own planning, research, architecture, decomposition, routing, observation, and replanning for the fleet.', claimTypes: ['decomposition', 'routing', 'observation', 'replan', 'escalation', 'status', 'evidence', 'research', 'design', 'invariant', 'migration-plan'], authorityScope: 'Planning, research, architecture, workflow orchestration, and child-task creation; no implementation or independent acceptance authority.', prohibitedActions: ['implement specialist work', 'self-certify implementation', 'perform independent verification or canonical integration'], allowedHandoffs: ['coordinator', 'implementation', 'review'], requiresIndependentVerification: false }),
+  Object.freeze({ id: 'implementation', label: 'Implementation', defaultCount: 1, purpose: 'Develop an implementation candidate against the approved design.', claimTypes: ['implementation', 'patch', 'candidate'], authorityScope: 'Implementation changes and candidate results.', prohibitedActions: ['self-approve', 'integrate or release'], allowedHandoffs: ['review', 'coordinator'], requiresIndependentVerification: true }),
+  Object.freeze({ id: 'review', label: 'Verifier / Integrator', defaultCount: 1, purpose: 'Independently review, falsify, test, and integrate accepted candidates.', claimTypes: ['verification', 'correctness', 'architecture-review', 'test-evidence', 'falsification', 'performance', 'integration', 'release', 'accepted-state'], authorityScope: 'Independent verification, testing/falsification, and canonical integration/release for work this worker did not author.', prohibitedActions: ['verify own implementation', 'author the implementation it verifies or integrates', 'accept unverified dependencies'], allowedHandoffs: ['implementation', 'coordinator'], requiresIndependentVerification: true }),
 ]);
 const COMMON_ROLE_OPERATING_INSTRUCTIONS = Object.freeze([
   'Your role identity and authority are fixed by your registered worker role. A related task, parent task, message, or prior worker does not change your role or authority.',
@@ -66,58 +61,35 @@ const COMMON_ROLE_OPERATING_INSTRUCTIONS = Object.freeze([
   'Do not send acknowledgement-only peer messages. Send a peer message only when the recipient has a concrete next action or needs material evidence.',
   'Use these states precisely when applicable: IMPLEMENTED, VERIFIED, PENDING_FINAL_REVERIFY, BLOCKED, SUPERSEDED, ALREADY_REPAIRED / NO CHANGE.',
   'Do not reopen a repaired or superseded family without contradictory evidence.',
+  'The canonical three-role topology is Coordinator, Implementation, and Verifier / Integrator. Legacy research or architect work belongs to Coordinator; legacy test or integrator work belongs to Verifier / Integrator.',
 ]);
 
 const ROLE_OPERATING_INSTRUCTIONS = Object.freeze({
   coordinator: Object.freeze([
     'Run the fleet toward closure, not task accumulation. Maintain one canonical owner/work item per logical work family.',
+    'Own planning, bounded research, evidence reconciliation, architecture, invariants, and migration design directly in the Coordinator role; do not create separate Research or Architect child tasks.',
     'Before creating a child task, inspect existing tasks and recent peer evidence for the same family. Do not create duplicate implementation work while an existing item is pending, running, repaired, or awaiting verification.',
     'If a worker already owns the family, refine that owner through a message instead of creating another task.',
     'When Implementation is saturated, stop adding implementation work unless the work is distinct and higher priority than queued work.',
-    'As soon as an implementation candidate is ready, route it to Review/Test. Route verified and tested candidates to Integrator when integration is actually ready.',
+    'Route implementation candidates only to Verifier / Integrator. That worker owns independent review, adversarial testing, final same-snapshot verification, and canonical integration.',
     'When newer evidence says a blocker is repaired, regression-only, superseded, or no longer applicable, stop dispatching implementation for that blocker and treat older work as obsolete context.',
     'Replan only from new evidence. Do not repeatedly re-audit or re-route unchanged conclusions.',
-  ]),
-  research: Object.freeze([
-    'Produce bounded evidence for the exact question assigned. Prefer new evidence over repeating an existing audit.',
-    'Check existing conclusions before reinvestigating a family. If current evidence already answers the question, report that fact rather than starting a parallel investigation.',
-    'Identify contradictions, stale evidence, missing facts, and likely ownership, but do not turn findings into implementation tasks yourself.',
-    'Return concise source-grounded findings to Coordinator or the specialist who has a concrete next action.',
-  ]),
-  architect: Object.freeze([
-    'Define the single canonical design and ownership boundary for the assigned problem.',
-    'Reconcile competing or overlapping proposed fixes into one canonical plan.',
-    'If an existing implementation owner already covers the family, refine that owner through Coordinator instead of proposing another implementation lane.',
-    'State invariants, legitimate ingress boundaries, prohibited alternate paths, migration boundaries, and acceptance conditions explicitly.',
-    'Do not reopen an architectural question that has already been settled unless new evidence contradicts the decision.',
   ]),
   implementation: Object.freeze([
     'Implement only the assigned logical family. Do not absorb adjacent blockers or duplicate another Implementor active family.',
     'Before changing code, inspect the live tree and recent evidence. If the requested repair is already present, report ALREADY_REPAIRED / NO CHANGE instead of implementing it again.',
     'Preserve the approved design and serialized or identity compatibility constraints.',
-    'Test incrementally. When the candidate is ready, immediately hand the exact candidate and snapshot to Review/Test.',
-    'Do not continue modifying a handed-off candidate unless verification produces a concrete failure requiring repair.',
+    'Test incrementally. When the candidate is ready, immediately hand the exact candidate, snapshot identity, and focused evidence to Verifier / Integrator.',
+    'Do not verify, accept, merge, release, or continue modifying a handed-off candidate unless verification returns a concrete defect requiring repair.',
   ]),
   review: Object.freeze([
-    'Review a specific candidate on a specific snapshot; do not silently combine evidence from different snapshots.',
-    'Verify architecture, invariants, authority boundaries, compatibility, and correctness.',
-    'Do not reopen repaired families without contradictory evidence.',
-    'If the shared tree is still changing, classify a passing candidate as PENDING_FINAL_REVERIFY rather than repeatedly reviewing it.',
-    'On failure, send the Implementor one bounded actionable defect. On success, send the evidence needed by Coordinator or Integrator.',
-  ]),
-  test: Object.freeze([
-    'Falsify the specific claims of a specific candidate and snapshot.',
-    'Prefer focused adversarial and regression tests over rerunning expensive broad suites when the candidate snapshot has not materially changed.',
+    'Act as the independent Verifier / Integrator for a specific candidate on a specific snapshot; never verify or accept implementation you authored.',
+    'Verify architecture, invariants, authority boundaries, compatibility, and correctness, then actively try to falsify the candidate with focused adversarial, regression, concurrency, and performance tests as relevant.',
     'Distinguish a real implementation failure from unrelated dirty-tree, build, environment, or infrastructure interference.',
-    'Once a candidate passes, report VERIFIED or PENDING_FINAL_REVERIFY as appropriate and stop retesting until the candidate or snapshot changes.',
-    'Send concrete failures directly to the responsible Implementor and material results to Coordinator or Integrator.',
-  ]),
-  integrator: Object.freeze([
-    'Integrate only candidates that have the required independent Review/Test evidence.',
+    'If the shared tree is still changing, classify a passing candidate as PENDING_FINAL_REVERIFY and do not integrate until final verification is valid on one canonical snapshot.',
     'Maintain one canonical reconciled snapshot. Reject stale, mixed-snapshot, or superseded evidence rather than reconciling it implicitly.',
-    'When required implementation families are settled, publish the exact immutable HEAD, worktree/status identity, and candidate scope for final same-snapshot verification.',
-    'Do not implement missing fixes; route failures back to the appropriate specialist.',
-    'Once all required evidence is valid on the same snapshot, perform canonical integration or release and report the accepted state.',
+    'On failure, send the Implementor one bounded actionable defect. Do not author the substantive repair yourself.',
+    'Once the required evidence is valid on the same snapshot, perform canonical integration or release and report the exact accepted state to Coordinator.',
   ]),
 });
 
@@ -126,8 +98,12 @@ const MAX_ROLE_COUNT = 16;
 const DEFAULT_ROLE_COUNTS = Object.freeze(Object.fromEntries(
   ROLE_CATALOG.map((role) => [role.id, role.defaultCount]),
 ));
+const DEFAULT_ROLE_TURN_LIMITS = Object.freeze(Object.fromEntries(
+  ROLE_CATALOG.map((role) => [role.id, MAX_TURNS_PER_CHAT]),
+));
 const DEFAULT_TOPOLOGY = Object.freeze({
   desiredRoleCounts: DEFAULT_ROLE_COUNTS,
+  maxTurnsPerChatByRole: DEFAULT_ROLE_TURN_LIMITS,
 });
 
 let stateQueue = Promise.resolve();
@@ -251,24 +227,36 @@ async function restartRepeatCycle(tabId) {
   return { restarted: true, state: next, mode: 'new_chat', tabId };
 }
 
-function normalizeTopology(value = {}) {
+function normalizeTopology(value = {}, legacyMaxTurnsPerChat = MAX_TURNS_PER_CHAT) {
   const source = value && typeof value === 'object' ? value : {};
   const rawCounts = source.desiredRoleCounts && typeof source.desiredRoleCounts === 'object'
     ? source.desiredRoleCounts
     : {};
+  const rawTurnLimits = source.maxTurnsPerChatByRole && typeof source.maxTurnsPerChatByRole === 'object'
+    ? source.maxTurnsPerChatByRole
+    : {};
   const migratedCounts = { ...rawCounts };
+  const migratedTurnLimits = { ...rawTurnLimits };
   if (migratedCounts.coordinator === undefined && migratedCounts.generalist !== undefined) {
     migratedCounts.coordinator = migratedCounts.generalist;
   }
+  if (migratedTurnLimits.coordinator === undefined && migratedTurnLimits.generalist !== undefined) {
+    migratedTurnLimits.coordinator = migratedTurnLimits.generalist;
+  }
   const desiredRoleCounts = {};
+  const maxTurnsPerChatByRole = {};
+  const legacyTurnLimit = boundedMaxTurnsPerChat(legacyMaxTurnsPerChat);
   for (const role of ROLE_CATALOG) {
     const fallback = role.defaultCount;
     desiredRoleCounts[role.id] = Math.max(
       0,
       Math.min(MAX_ROLE_COUNT, Math.trunc(Number(migratedCounts[role.id] ?? fallback) || 0)),
     );
+    maxTurnsPerChatByRole[role.id] = boundedMaxTurnsPerChat(
+      migratedTurnLimits[role.id] ?? legacyTurnLimit,
+    );
   }
-  return { desiredRoleCounts };
+  return { desiredRoleCounts, maxTurnsPerChatByRole };
 }
 
 function freshFleetState() {
@@ -298,6 +286,7 @@ function normalizeFleetState(value) {
     key,
     Object.prototype.hasOwnProperty.call(storedPolicy, key) ? storedPolicy[key] : DEFAULT_POLICY[key],
   ]));
+  const topology = normalizeTopology(state.topology, storedPolicy.maxTurnsPerChat);
   const sourceWorkers = state.workers && typeof state.workers === 'object' ? state.workers : {};
   const workers = {};
   const legacyWorkerMap = new Map();
@@ -325,7 +314,7 @@ function normalizeFleetState(value) {
     worker.topologyManaged = worker.topologyManaged === true;
     worker.chatTurnCount = Math.max(0, Math.trunc(Number(worker.chatTurnCount || 0)));
     worker.chatRotationPending = worker.chatRotationPending === true
-      || worker.chatTurnCount >= boundedMaxTurnsPerChat(policy.maxTurnsPerChat);
+      || worker.chatTurnCount >= maxTurnsPerChatForRole(topology, worker.role);
     worker.lastCountedAssignmentId = String(worker.lastCountedAssignmentId || '');
     worker.currentMessageIds = Array.from(new Set([
       ...(Array.isArray(worker.currentMessageIds) ? worker.currentMessageIds : []),
@@ -373,7 +362,7 @@ function normalizeFleetState(value) {
     ...freshFleetState(),
     ...state,
     policy,
-    topology: normalizeTopology(state.topology),
+    topology,
     workers,
     nextWorkerSlot,
     tasks,
@@ -550,7 +539,8 @@ function allocateWorkerSlot(state) {
 
 function normalizeRole(role) {
   const value = String(role || '').trim().toLowerCase();
-  if (value === 'generalist') return 'coordinator';
+  if (['generalist', 'research', 'architect'].includes(value)) return 'coordinator';
+  if (['test', 'integrator', 'verifier', 'verifier-integrator', 'verifier / integrator'].includes(value)) return 'review';
   return value || 'coordinator';
 }
 
@@ -565,12 +555,8 @@ function roleContract(role) {
 
 const ROLE_MEMBER_LABELS = Object.freeze({
   coordinator: 'Coordinator',
-  research: 'Researcher',
-  architect: 'Architect',
   implementation: 'Implementor',
-  review: 'Reviewer',
-  test: 'Tester',
-  integrator: 'Integrator',
+  review: 'Verifier / Integrator',
 });
 
 function workerRoleOrdinal(state, worker) {
@@ -1072,6 +1058,11 @@ function boundedMaxTurnsPerChat(value) {
   return Math.max(1, Math.min(50, Number.isFinite(parsed) && parsed > 0 ? parsed : MAX_TURNS_PER_CHAT));
 }
 
+function maxTurnsPerChatForRole(topology, role) {
+  const canonical = canonicalRole(role);
+  return boundedMaxTurnsPerChat(topology?.maxTurnsPerChatByRole?.[canonical]);
+}
+
 function warmIdleAlarmName(workerId) {
   return `${WARM_IDLE_ALARM_PREFIX}${workerId}`;
 }
@@ -1317,7 +1308,7 @@ async function rotateWorkerChat(workerId, reason = 'chat turn limit reached') {
       reason,
       tabId: worker.tabId,
       turns: worker.chatTurnCount,
-      limit: boundedMaxTurnsPerChat(state.policy.maxTurnsPerChat),
+      limit: maxTurnsPerChatForRole(state.topology, worker.role),
     });
     return { tabId: worker.tabId };
   });
@@ -1539,7 +1530,7 @@ function upsertWorker(state, tab, patch = {}) {
     completionReleaseLagMaxMs: Math.max(0, Number(existing.completionReleaseLagMaxMs || 0)),
     chatTurnCount: Math.max(0, Math.trunc(Number(existing.chatTurnCount || 0))),
     chatRotationPending: existing.chatRotationPending === true
-      || Math.max(0, Math.trunc(Number(existing.chatTurnCount || 0))) >= boundedMaxTurnsPerChat(state.policy.maxTurnsPerChat),
+      || Math.max(0, Math.trunc(Number(existing.chatTurnCount || 0))) >= maxTurnsPerChatForRole(state.topology, requestedRole),
     lastCountedAssignmentId: String(existing.lastCountedAssignmentId || ''),
     lastChatRotationAt: Number(existing.lastChatRotationAt || 0),
     registeredAt: existing.registeredAt || now(),
@@ -1636,15 +1627,9 @@ function taskBlockReason(state, task, worker = null) {
   const missing = deps.filter((id) => state.tasks[id]?.status !== 'done');
   if (missing.length) return `waiting for dependencies: ${missing.join(', ')}`;
   const taskRole = canonicalRole(task.role);
-  if (['review', 'test'].includes(taskRole)) {
+  if (taskRole === 'review') {
     const dependencyWorkers = new Set(deps.map((id) => state.tasks[id]?.completedByWorkerId).filter(Boolean));
-    if (worker && dependencyWorkers.has(worker.id)) return `${taskRole} requires an independent worker from direct dependency completers`;
-  }
-  if (taskRole === 'integrator') {
-    if (!deps.length) return 'integrator tasks require at least one direct dependency';
-    if (deps.some((id) => state.tasks[id]?.status !== 'done')) return 'integrator requires every direct dependency to be done';
-    if (!deps.some((id) => ['review', 'test'].includes(canonicalRole(state.tasks[id]?.role)))) return 'integrator requires a direct review or test dependency';
-    if (worker && deps.some((id) => state.tasks[id]?.completedByWorkerId === worker.id)) return 'integrator must use a worker independent from dependency completers';
+    if (worker && dependencyWorkers.has(worker.id)) return 'review requires an independent worker from direct dependency completers';
   }
   return '';
 }
@@ -1756,6 +1741,8 @@ function buildTaskPrompt(state, task, worker) {
     ? 'Coordinator control loop only: decompose, route, observe, replan, and escalate. Do not perform specialist implementation, review, test, architecture, research, or integration work yourself.'
     : 'Do not claim authority beyond this contract or verify work you completed yourself.';
   return [
+    '@chatgpt-mcp-tunnel',
+    '',
     '[MODEL FLEET ASSIGNMENT]',
     `Worker: ${worker.id}`,
     `Role: ${worker.role}`,
@@ -1779,6 +1766,9 @@ function buildTaskPrompt(state, task, worker) {
     task.prompt,
     '',
     'Work independently and make concrete progress. You may use tools actually available in this ChatGPT session.',
+    'Before repository work, initialize connector custody: call workspace:open_context for the target repository and obtain context_id.',
+    'Use the returned context_id for every workspace operation. Do not claim repository access, edits, builds, or tests until context creation succeeds.',
+    'If workspace context creation fails, report BLOCKED with the capability failure. Do not invent repository state or patches.',
     'If the connected chatgpt-mcp-connector is available and useful, you may call it. Do not claim a tool ran unless it actually ran.',
     'Do not wait for other workers unless the task genuinely depends on them.',
     '',
@@ -1808,6 +1798,11 @@ function buildMessagePrompt(state, messageOrMessages, worker) {
     ];
   });
   return [
+    '@chatgpt-mcp-tunnel',
+    'Before repository work, initialize connector custody: call workspace:open_context for the target repository and obtain context_id.',
+    'Use the returned context_id for every workspace operation. Do not claim repository access, edits, builds, or tests until context creation succeeds.',
+    'If workspace context creation fails, report BLOCKED with the capability failure. Do not invent repository state or patches.',
+    '',
     '[MODEL FLEET MESSAGE]',
     `Recipient: ${workerIdentityLabel(state, worker)}`,
     `Batch size: ${messages.length}`,
@@ -1836,6 +1831,11 @@ function buildMessagePrompt(state, messageOrMessages, worker) {
 
 function buildControlPrompt(state, worker) {
   return [
+    '@chatgpt-mcp-tunnel',
+    'Before repository work, initialize connector custody: call workspace:open_context for the target repository and obtain context_id.',
+    'Use the returned context_id for every workspace operation. Do not claim repository access, edits, builds, or tests until context creation succeeds.',
+    'If workspace context creation fails, report BLOCKED with the capability failure. Do not invent repository state or patches.',
+    '',
     '[MODEL FLEET MESSAGE]',
     `Recipient: ${workerIdentityLabel(state, worker)}`,
     'Batch size: 0 semantic messages',
@@ -1954,12 +1954,6 @@ function createTaskInState(state, {
     lastAutoRecoveryReason: '',
   };
   if (!task.prompt) throw new Error('task prompt is required');
-  if (task.role === 'integrator') {
-    if (!task.dependencies.length) throw new Error('integrator tasks require at least one direct dependency');
-    if (!task.dependencies.some((depId) => ['review', 'test'].includes(canonicalRole(state.tasks[depId]?.role)))) {
-      throw new Error('integrator tasks require a direct review or test dependency');
-    }
-  }
   state.tasks[id] = task;
   appendJournal(state, 'task.created', `${id}: ${task.title}`, {
     role: task.role,
@@ -2514,7 +2508,7 @@ async function dispatchReserved(dispatch) {
         if (worker.lastCountedAssignmentId !== dispatch.assignment.id) {
           worker.lastCountedAssignmentId = dispatch.assignment.id;
           worker.chatTurnCount = Math.max(0, Math.trunc(Number(worker.chatTurnCount || 0))) + 1;
-          const limit = boundedMaxTurnsPerChat(state.policy.maxTurnsPerChat);
+          const limit = maxTurnsPerChatForRole(state.topology, worker.role);
           if (worker.chatTurnCount >= limit) {
             worker.chatRotationPending = true;
             appendJournal(state, 'worker.chat_limit_reached', dispatch.workerId + ' reached ' + worker.chatTurnCount + '/' + limit + ' turns', {
@@ -3010,6 +3004,28 @@ async function setTopologyRoleCount(role, count) {
   return publicSnapshot(state);
 }
 
+async function setRoleTurnLimit(role, limit) {
+  const normalized = normalizeRole(role);
+  if (!ROLE_IDS.has(normalized)) throw new Error('unsupported fleet role');
+  const nextLimit = boundedMaxTurnsPerChat(limit);
+  const { state } = await mutateFleet((state) => {
+    state.topology = normalizeTopology(state.topology);
+    state.topology.maxTurnsPerChatByRole[normalized] = nextLimit;
+    for (const worker of Object.values(state.workers)) {
+      if (canonicalRole(worker.role) !== normalized) continue;
+      if (Math.max(0, Math.trunc(Number(worker.chatTurnCount || 0))) >= nextLimit) {
+        worker.chatRotationPending = true;
+      }
+    }
+    appendJournal(state, 'topology.role_turn_limit', `${normalized} turns/chat → ${nextLimit}`, {
+      role: normalized,
+      maxTurnsPerChat: nextLimit,
+    });
+  });
+  schedule().catch(() => {});
+  return publicSnapshot(state);
+}
+
 async function createTopologyWorker(role) {
   const canonical = canonicalRole(role);
   const created = await chrome.windows.create({
@@ -3441,11 +3457,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (!worker) throw new Error('worker not found');
       if (worker.currentAssignmentId) throw new Error('cannot change role while worker owns an active assignment');
       worker.role = canonicalRole(message.role);
+      if (worker.chatTurnCount >= maxTurnsPerChatForRole(state.topology, worker.role)) {
+        worker.chatRotationPending = true;
+      }
       appendJournal(state, 'worker.role', `${worker.id} role → ${worker.role}`);
     }).then(({ state }) => ({ snapshot: publicSnapshot(state) })));
   }
   if (message.type === 'fleet:set-topology-role-count') {
     return reply(setTopologyRoleCount(message.role, message.count).then((snapshot) => ({ snapshot })));
+  }
+  if (message.type === 'fleet:set-role-turn-limit') {
+    return reply(setRoleTurnLimit(message.role, message.limit).then((snapshot) => ({ snapshot })));
   }
   if (message.type === 'fleet:reconcile-topology') {
     return reply(reconcileFleetTopology());
@@ -3521,13 +3543,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (Object.prototype.hasOwnProperty.call(patch, 'authorityEnabled')) state.policy.authorityEnabled = patch.authorityEnabled === true;
       if (Object.prototype.hasOwnProperty.call(patch, 'activeWorkerWindows')) state.policy.activeWorkerWindows = patch.activeWorkerWindows !== false;
       if (Object.prototype.hasOwnProperty.call(patch, 'warmIdleMs')) state.policy.warmIdleMs = boundedWarmIdleMs(patch.warmIdleMs);
-      if (Object.prototype.hasOwnProperty.call(patch, 'maxTurnsPerChat')) {
-        state.policy.maxTurnsPerChat = boundedMaxTurnsPerChat(patch.maxTurnsPerChat);
-        const limit = state.policy.maxTurnsPerChat;
-        for (const worker of Object.values(state.workers)) {
-          if (Math.max(0, Math.trunc(Number(worker.chatTurnCount || 0))) >= limit) worker.chatRotationPending = true;
-        }
-      }
       appendJournal(state, 'policy.changed', 'Execution policy updated', { ...state.policy });
     }).then(({ state }) => {
       schedule().catch(() => {});
