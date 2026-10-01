@@ -303,6 +303,7 @@ function freshFleetState() {
     version: 1,
     generation: 1,
     goal: '',
+    lastGoalContinuationKey: '',
     workspacePath: '',
     policy: { ...DEFAULT_POLICY },
     topology: { ...DEFAULT_TOPOLOGY },
@@ -2067,6 +2068,7 @@ function queueSemanticMessage(state, {
   requiresFleetMessage = false,
   protocolRepairOf = null,
   protocolRepairAttempts = 0,
+  goalContinuation = false,
 }) {
   const id = `M-${state.nextMessage++}`;
   const message = {
@@ -2087,10 +2089,73 @@ function queueSemanticMessage(state, {
     requiresFleetMessage: requiresFleetMessage === true,
     protocolRepairOf,
     protocolRepairAttempts: Number(protocolRepairAttempts || 0),
+    goalContinuation: goalContinuation === true,
   };
   state.messages.push(message);
   if (state.messages.length > MAX_MESSAGES) state.messages.splice(0, state.messages.length - MAX_MESSAGES);
   appendJournal(state, 'message.queued', `${id}: ${fromWorkerId || from || 'operator'} → ${toWorkerId}`, { taskId });
+  return message;
+}
+
+function compactFleetFingerprint(value) {
+  const source = String(value || '');
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${source.length}:${(hash >>> 0).toString(16)}`;
+}
+
+function goalFrontierKey(state) {
+  const taskState = Object.values(state.tasks || {})
+    .sort((a, b) => String(a.id || '').localeCompare(String(b.id || ''), undefined, { numeric: true }))
+    .map((task) => [task.id, task.status, Number(task.completedAt || 0), Number(task.attempts || 0), String(task.lastAutoRecoveryReason || '')]);
+  const messageState = (Array.isArray(state.messages) ? state.messages : [])
+    .filter((message) => message && message.goalContinuation !== true && message.toWorkerId !== 'operator')
+    .map((message) => [message.id, message.status, message.fromWorkerId || message.from || '', message.toWorkerId || '', Number(message.completedAt || 0), Number(message.autoRecoveryAttempts || 0), String(message.lastAutoRecoveryReason || '')]);
+  return compactFleetFingerprint(JSON.stringify({
+    goal: String(state.goal || '').trim(),
+    tasks: taskState,
+    messages: messageState,
+  }));
+}
+
+function queueGoalContinuationIfNeeded(state) {
+  const goal = String(state.goal || '').trim();
+  if (!goal || state.policy?.paused || state.policy?.authorityEnabled === false) return null;
+  if (Object.values(state.workers || {}).some((worker) => worker?.currentAssignmentId)) return null;
+  if ((state.messages || []).some((message) => message?.status === 'queued' || message?.status === 'running')) return null;
+  const coordinator = Object.values(state.workers || {})
+    .filter((worker) => worker
+      && worker.enabled
+      && canonicalRole(worker.role) === 'coordinator'
+      && Number.isInteger(worker.tabId)
+      && worker.lifecycle !== 'stale'
+      && worker.status !== 'blocked')
+    .sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }))[0];
+  if (!coordinator) return null;
+  const frontierKey = goalFrontierKey(state);
+  if (frontierKey && frontierKey === String(state.lastGoalContinuationKey || '')) return null;
+  const message = queueSemanticMessage(state, {
+    from: 'scheduler',
+    toWorkerId: coordinator.id,
+    goalContinuation: true,
+    body: [
+      'GOAL CONTINUATION.',
+      'The fleet is quiescent: no semantic messages, runnable tasks, active assignments, or control notices remain, but the fleet goal is still set.',
+      `Goal: ${goal}`,
+      '',
+      'Reconcile the current durable fleet state and continue toward the goal.',
+      '- Inspect existing task/message results and failures before creating new work.',
+      '- If unfinished, emit only the bounded next FLEET_TASK/FLEET_MESSAGE work required by the current frontier.',
+      '- If blocked, report the exact blocker to operator.',
+      '- If the goal is genuinely complete, report completion to operator and emit no new work.',
+      '- Do not create work merely to keep workers busy.',
+    ].join('\n'),
+  });
+  state.lastGoalContinuationKey = frontierKey;
+  appendJournal(state, 'goal.continuation_queued', `${message.id} queued to ${coordinator.id}`, { workerId: coordinator.id, frontierKey });
   return message;
 }
 
@@ -2666,7 +2731,7 @@ async function schedule() {
   scheduling = true;
   let dispatches = [];
   try {
-    const preview = await loadFleetState();
+    let preview = await loadFleetState();
     if (preview.policy.paused || !preview.policy.authorityEnabled) {
       await journalDeferredMessages(preview, preview.policy.paused ? 'dispatch paused' : 'authority revoked');
       return;
@@ -2708,6 +2773,7 @@ async function schedule() {
       && worker.lifecycle !== 'stale'
       && Number.isInteger(worker.tabId));
     if (!hasQueuedMessage && !hasRunnableTask && !hasControlWork) {
+      if (active === 0 && (await mutateFleet((state) => queueGoalContinuationIfNeeded(state))).result) { schedulePending = true; return; }
       await journalDeferredMessages(preview, 'no runnable work');
       return;
     }
@@ -3706,8 +3772,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'fleet:set-goal') {
     return reply(mutateFleet((state) => {
       state.goal = String(message.goal || '').trim();
+      state.lastGoalContinuationKey = '';
       appendJournal(state, 'goal.changed', state.goal || 'Goal cleared');
-    }).then(({ state }) => ({ snapshot: publicSnapshot(state) })));
+    }).then(({ state }) => { schedule().catch(() => {}); return { snapshot: publicSnapshot(state) }; }));
   }
   if (message.type === 'fleet:create-task') {
     return reply(mutateFleet((state) => createTaskInState(state, {
