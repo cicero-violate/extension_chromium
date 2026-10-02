@@ -1,4 +1,4 @@
-# ChatGPT Auto Approval WASM
+# Model Fleet Extension
 
 A minimal Chromium extension that automatically clicks likely ChatGPT approval buttons after scoring nearby controls with a WASM helper.
 
@@ -14,7 +14,7 @@ A minimal Chromium extension that automatically clicks likely ChatGPT approval b
 ## Build
 
 ```bash
-cd /workspace/ai_sandbox/extension_chromium/auto_approval
+cd /workspace/ai_sandbox/extension_chromium/model_fleet
 ./build.sh
 ```
 
@@ -30,7 +30,7 @@ rustup target add wasm32-unknown-unknown
 In Chromium, load unpacked extension:
 
 ```text
-/workspace/ai_sandbox/extension_chromium/auto_approval/extension
+/workspace/ai_sandbox/extension_chromium/model_fleet/extension
 ```
 
 ## Behavior
