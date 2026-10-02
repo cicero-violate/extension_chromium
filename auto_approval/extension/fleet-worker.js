@@ -17,6 +17,7 @@
   const ASSIGNMENT_RECOVERY_HINT_ID = '__model_fleet_assignment_recovery__';
 
   let registered = false;
+  let registeredWorkerId = null;
   let heartbeatTimer = null;
   let monitorSettleTimer = null;
   let monitorObserver = null;
@@ -998,8 +999,11 @@
     return { assignmentId: assignment.id, phase: 'preparing' };
   }
 
-  async function cancelCurrent(reason = 'cancelled') {
-    if (!active) return;
+  async function cancelCurrent(reason = 'cancelled', expectedAssignmentId) {
+    if (!active) return expectedAssignmentId === undefined ? undefined : { ok: true, noOp: true, code: 'stale-no-active-assignment' };
+    if (expectedAssignmentId !== undefined && expectedAssignmentId !== active.assignment.id) {
+      return { ok: false, noOp: true, code: 'assignment-ownership-mismatch', expectedAssignmentId, activeAssignmentId: active.assignment.id };
+    }
     const cancelled = active;
     active = null;
     clearAssignmentRecoveryHint(cancelled.assignment.id);
@@ -1017,14 +1021,16 @@
     if (stopButton && usable(stopButton) && enabledButton(stopButton)) stopButton.click();
 
     try {
-      await runtimeMessage({
+      const response = await runtimeMessage({
         type: 'fleet:assignment-cancelled',
         assignmentId: cancelled.assignment.id,
         reason,
       });
       signalIdleReady(cancelled.assignment.id);
+      return { ok: response?.ok !== false, assignmentId: cancelled.assignment.id, cancelled: true };
     } catch {
       // Keep the worker live if cancellation authority was not acknowledged.
+      return { ok: false, assignmentId: cancelled.assignment.id, cancelled: true };
     }
   }
 
@@ -1084,17 +1090,34 @@
     }
 
     if (message.type === 'fleet:cancel-current') {
-      cancelCurrent(message.reason || 'cancelled')
-        .then(() => sendResponse({ ok: true }))
+      cancelCurrent(message.reason || 'cancelled', Object.prototype.hasOwnProperty.call(message, 'expectedAssignmentId') ? message.expectedAssignmentId : undefined)
+        .then((result) => sendResponse(result === undefined ? { ok: true } : result))
         .catch((error) => sendResponse({ ok: false, error: String(error) }));
       return true;
     }
 
     if (message.type === 'fleet:registration-changed') {
-      registered = message.registered === true;
-      if (registered) {
+      if (message.registered === true) {
+        const hasExpected = Object.prototype.hasOwnProperty.call(message, 'expectedWorkerId');
+        const expectedWorkerId = hasExpected ? String(message.expectedWorkerId || '') : '';
+        if (hasExpected && registeredWorkerId !== null && registeredWorkerId !== expectedWorkerId) {
+          sendResponse({ ok: true, noOp: true, code: 'registration-identity-conflict', registeredWorkerId });
+          return false;
+        }
+        registered = true;
+        if (hasExpected) registeredWorkerId = expectedWorkerId;
+        else if (message.worker?.id) registeredWorkerId = String(message.worker.id);
         recoverPendingCompletion().finally(() => startHeartbeat());
-      } else stopHeartbeat();
+      } else {
+        const hasExpected = Object.prototype.hasOwnProperty.call(message, 'expectedWorkerId');
+        if (hasExpected && registeredWorkerId !== String(message.expectedWorkerId || '')) {
+          sendResponse({ ok: true, noOp: true, code: 'registration-identity-mismatch', registeredWorkerId });
+          return false;
+        }
+        registered = false;
+        registeredWorkerId = null;
+        stopHeartbeat();
+      }
       sendResponse({ ok: true });
       return false;
     }
@@ -1109,9 +1132,11 @@
         activeAssignmentId: active?.assignment.id || pendingCompletion?.assignmentId || readAssignmentRecoveryHint() || null,
       });
       registered = response?.registered === true;
+      registeredWorkerId = registered ? (response?.worker?.id ? String(response.worker.id) : null) : null;
       if (registered) startHeartbeat();
     } catch {
       registered = false;
+      registeredWorkerId = null;
     }
   }
 

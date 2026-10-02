@@ -3753,125 +3753,68 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return reply(loadFleetState().then((state) => ({ snapshot: publicSnapshot(state) })));
   }
   if (message.type === 'fleet:get-tab-worker-state') {
-    return reply(loadFleetState().then((state) => ({ worker: workerForTab(state, message.tabId) || null })));
+    return reply(getTabWorkerStateC16Dispatch(message));
   }
   if (message.type === 'fleet:register-own-worker') {
     const tabId = sender.tab?.id;
-    return reply(registerTab(tabId, message.patch || {}).then(({ worker, snapshot }) => ({ worker, snapshot })));
+    return reply(registerTab(tabId, message.patch || {}).then((result) => result?.bindingMode
+      ? result
+      : ({ worker: result.worker, snapshot: result.snapshot })));
   }
   if (message.type === 'fleet:register-tab') {
-    return reply(registerTab(message.tabId, message.patch || {}).then(({ worker, snapshot }) => ({ worker, snapshot })));
+    return reply(registerTab(message.tabId, message.patch || {}).then((result) => result?.bindingMode
+      ? result
+      : ({ worker: result.worker, snapshot: result.snapshot })));
   }
   if (message.type === 'fleet:unregister-worker') {
-    return reply(unregisterWorker(message.workerId).then((snapshot) => ({ snapshot })));
+    return reply(unregisterWorker(message.workerId).then((result) => result && Object.prototype.hasOwnProperty.call(result, 'removed') ? result : ({ snapshot: result })));
   }
   if (message.type === 'fleet:focus-worker') {
     return reply(focusWorker(message.workerId).then(() => ({})));
   }
   if (message.type === 'fleet:set-worker-role') {
-    return reply(mutateFleet((state) => {
-      const worker = state.workers[message.workerId];
-      if (!worker) throw new Error('worker not found');
-      if (worker.currentAssignmentId) throw new Error('cannot change role while worker owns an active assignment');
-      worker.role = canonicalRole(message.role);
-      if (worker.chatTurnCount >= maxTurnsPerChatForRole(state.topology, worker.role)) {
-        worker.chatRotationPending = true;
-      }
-      appendJournal(state, 'worker.role', `${worker.id} role → ${worker.role}`);
-    }).then(({ state }) => ({ snapshot: publicSnapshot(state) })));
+    // Legacy parity remains: cannot change role while worker owns an active assignment.
+    return reply(setWorkerRoleC11Dispatch(message));
+
+
+
+
+
+
+
+
+
+
+
   }
   if (message.type === 'fleet:set-topology-role-count') {
-    return reply(setTopologyRoleCount(message.role, message.count).then((snapshot) => ({ snapshot })));
+    return reply(setTopologyRoleCountC11Dispatch(message));
   }
   if (message.type === 'fleet:set-role-turn-limit') {
-    return reply(setRoleTurnLimit(message.role, message.limit).then((snapshot) => ({ snapshot })));
+    return reply(setRoleTurnLimitC11Dispatch(message));
   }
   if (message.type === 'fleet:reconcile-topology') {
     return reply(reconcileFleetTopology());
   }
   if (message.type === 'fleet:set-workspace-path') {
-    return reply(mutateFleet((state) => {
-      state.workspacePath = String(message.workspacePath || '').trim();
-      appendJournal(state, 'workspace.path.changed', state.workspacePath || 'Workspace path cleared');
-    }).then(({ state }) => ({ snapshot: publicSnapshot(state) })));
+    return reply(setWorkspacePathC13Dispatch(message));
   }
   if (message.type === 'fleet:set-goal') {
-    return reply(mutateFleet((state) => {
-      state.goal = String(message.goal || '').trim();
-      state.lastGoalContinuationKey = '';
-      appendJournal(state, 'goal.changed', state.goal || 'Goal cleared');
-    }).then(({ state }) => { schedule().catch(() => {}); return { snapshot: publicSnapshot(state) }; }));
+    // C13 v2 preserves state.lastGoalContinuationKey = '' and calls schedule().catch after commit.
+    return reply(setGoalC13Dispatch(message));
   }
   if (message.type === 'fleet:create-task') {
-    return reply(mutateFleet((state) => createTaskInState(state, {
-      title: message.title,
-      prompt: message.prompt,
-      role: message.role,
-      priority: message.priority,
-      dependencies: message.dependencies,
-      createdByRole: 'operator',
-    }, { allowCoordinator: true })).then(({ state, result: task }) => {
-      schedule().catch(() => {});
-      return { task, snapshot: publicSnapshot(state) };
-    }));
+    // v1 createTaskInState compatibility remains delegated; C14 v2 uses createTaskV2.
+    return reply(createTaskC14Dispatch(message));
   }
   if (message.type === 'fleet:retry-task') {
-    return reply(mutateFleet((state) => {
-      const task = state.tasks[message.taskId];
-      if (!task) throw new Error('task not found');
-      if (task.status === 'running') throw new Error('task is currently running');
-      task.status = 'pending';
-      task.assignedWorkerId = null;
-      task.assignmentId = null;
-      task.result = '';
-      task.statusNote = '';
-      task.autoRecoveryAttempts = 0;
-      task.lastAutoRecoveryReason = '';
-      appendJournal(state, 'task.retried', `${task.id} queued for retry`);
-    }).then(({ state }) => {
-      schedule().catch(() => {});
-      return { snapshot: publicSnapshot(state) };
-    }));
+    return reply(retryTaskC14Dispatch(message));
   }
   if (message.type === 'fleet:send-message') {
-    return reply(mutateFleet((state) => {
-      const target = String(message.toWorkerId || '').trim();
-      if (target !== 'operator' && !state.workers[target]) throw new Error('target worker not found');
-      const queued = queueSemanticMessage(state, {
-        from: 'operator',
-        toWorkerId: target,
-        body: message.body,
-        taskId: message.taskId || null,
-      });
-      if (!queued.body) throw new Error('message body is required');
-      return queued;
-    }).then(async ({ result: queued }) => {
-      let scheduleError = null;
-      try {
-        // Wait through reservation, but not worker activation/acknowledgement.
-        // This makes the response reflect whether the target was admitted.
-        await scheduleMessageUntilAdmitted(queued.id);
-      } catch (error) {
-        scheduleError = String(error);
-      }
-      return { message: queued, scheduleError, snapshot: publicSnapshot(await loadFleetState()) };
-    }));
+    return reply(sendMessageC14Dispatch(message));
   }
   if (message.type === 'fleet:update-policy') {
-    return reply(mutateFleet((state) => {
-      const patch = message.patch || {};
-      if (Object.prototype.hasOwnProperty.call(patch, 'maxConcurrency')) {
-        state.policy.maxConcurrency = Math.max(1, Math.min(64, Number(patch.maxConcurrency || 1)));
-      }
-      if (Object.prototype.hasOwnProperty.call(patch, 'paused')) state.policy.paused = patch.paused === true;
-      if (Object.prototype.hasOwnProperty.call(patch, 'authorityEnabled')) state.policy.authorityEnabled = patch.authorityEnabled === true;
-      if (Object.prototype.hasOwnProperty.call(patch, 'activeWorkerWindows')) state.policy.activeWorkerWindows = patch.activeWorkerWindows !== false;
-      if (Object.prototype.hasOwnProperty.call(patch, 'warmIdleMs')) state.policy.warmIdleMs = boundedWarmIdleMs(patch.warmIdleMs);
-      appendJournal(state, 'policy.changed', 'Execution policy updated', { ...state.policy });
-    }).then(({ state }) => {
-      schedule().catch(() => {});
-      return { snapshot: publicSnapshot(state) };
-    }));
+    return reply(updatePolicyC13Dispatch(message));
   }
   if (message.type === 'fleet:cancel-worker-dispatch') {
     return reply(cancelWorkerDispatch(String(message.workerId || '').trim()));
@@ -3880,17 +3823,73 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return reply(stopAndFlushStaleWork());
   }
   if (message.type === 'fleet:kill-authority') {
-    return reply(killAuthority().then((snapshot) => ({ snapshot })));
+    return reply(killAuthority().then((result) => result && result.killed === true ? result : ({ snapshot: result })));
   }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   if (message.type === 'fleet:clear-completed') {
-    return reply(mutateFleet((state) => {
-      for (const [id, task] of Object.entries(state.tasks)) {
-        if (task.status === 'done') delete state.tasks[id];
-      }
-      state.messages = state.messages.filter((m) => m.status !== 'done');
-      appendJournal(state, 'state.pruned', 'Completed tasks/messages cleared');
-    }).then(({ state }) => ({ snapshot: publicSnapshot(state) })));
+    return reply(clearCompletedC15Dispatch());
   }
+
+
+
+
+
+
   if (message.type === 'fleet:worker-hello') {
     if (!sender.tab?.id) return false;
     return reply(reconcileOnHello(sender.tab, message));
@@ -3908,6 +3907,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'fleet:worker-idle-ready') {
     if (!sender.tab?.id) return false;
     return reply(loadFleetState().then((state) => {
+      if (state.version === 2) return c5WorkerIdleReadyV2(sender.tab.id, message);
       const workerId = workerIdForTabInState(state, sender.tab.id);
       if (workerId) {
         const worker = state.workers[workerId];
@@ -3922,7 +3922,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message.type === 'fleet:assignment-cancelled') {
     if (!sender.tab?.id) return false;
-    return reply(mutateFleet((state) => {
+    return reply(loadFleetState().then((loaded) => {
+      if (loaded.version === 2) return c6HandleAssignmentCancelledV2(sender.tab.id, message);
+      return mutateFleet((state) => {
       const workerId = workerIdForTabInState(state, sender.tab.id);
       if (!workerId) return false;
       const worker = state.workers[workerId];
@@ -3981,11 +3983,144 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         schedule().catch(() => {});
       }
       return { snapshot: publicSnapshot(state) };
+      });
     }));
   }
 
   return false;
 });
+
+
+// C6 v2 cancellation/recovery overlay. The legacy handlers above remain the
+// v1 branch; this boundary is selected from the durable state version.
+const cancelWorkerDispatchC5Legacy = cancelWorkerDispatch;
+function c6Module() { return globalThis.ModelFleetStateM7C6; }
+function c6ReasonClass(reason) {
+  if (reason === OPERATOR_CANCEL_REASON) return 'operator';
+  if (String(reason || '').startsWith(AUTO_RECOVERY_REASON_PREFIX)) return 'automatic-recovery';
+  return 'generic';
+}
+function c6ExactReceipt(worker, assignmentId, reason, tabId) {
+  return Boolean(worker
+    && worker.lastCancellationAssignmentId === assignmentId
+    && worker.lastCancellationReason === reason
+    && worker.lastCancellationTabId === tabId
+    && Number(worker.lastCancellationAt) > 0);
+}
+function c6Journal(state, type, text, detail, at) {
+  return globalThis.ModelFleetStateM7C3.appendJournal(state, type, text, detail, at);
+}
+function c6ApplyCancellationInState(state, workerId, assignmentId, reason, at, tabId, { allowHistoricalReceipt = false } = {}) {
+  const worker = state.workers[workerId];
+  if (!worker) return { result: { ok: false, code: 'worker-not-found', terminal: true, assignmentId } };
+  if (allowHistoricalReceipt && c6ExactReceipt(worker, assignmentId, reason, tabId)) return { result: { ok: true, idempotent: true, released: false, assignmentId, disposition: worker.lastCancellationDisposition || 'released' } };
+  const reboundWorkerId = workerIdForTabInState(state, tabId);
+  if (reboundWorkerId !== workerId || worker.tabId !== tabId) return { result: { ok: false, code: 'stale-tab-rebound', terminal: true, assignmentId, tabId } };
+  if (worker.currentAssignmentId && worker.currentAssignmentId !== assignmentId) return { result: { ok: false, code: 'assignment_ownership_mismatch', terminal: false, expectedAssignmentId: worker.currentAssignmentId, reportedAssignmentId: assignmentId } };
+  if (!worker.currentAssignmentId) {
+    if (c6ExactReceipt(worker, assignmentId, reason, tabId)) return { result: { ok: true, idempotent: true, released: false, assignmentId, disposition: worker.lastCancellationDisposition || 'released' } };
+    return { result: { ok: false, code: 'stale-no-owner', terminal: true, assignmentId } };
+  }
+  if (worker.currentAssignmentId !== assignmentId) return { result: { ok: false, code: 'assignment_ownership_mismatch', terminal: false, expectedAssignmentId: worker.currentAssignmentId, reportedAssignmentId: assignmentId } };
+  const assignment = state.assignments[assignmentId];
+  if (!assignment || assignment.workerId !== workerId) return { result: { ok: false, code: 'assignment_ownership_mismatch', terminal: false, expectedAssignmentId: worker.currentAssignmentId, reportedAssignmentId: assignmentId } };
+  if (assignment.phase === 'completing') return { result: { ok: false, code: 'completion-custody-protected', terminal: false, assignmentId } };
+  const kind = c6ReasonClass(reason);
+  let outcome;
+  if (kind === 'operator') outcome = c6Module().cancelAssignment(state, { workerId, assignmentId });
+  else if (kind === 'automatic-recovery') outcome = c6Module().applyAutomaticRecovery(state, { workerId, assignmentId, reason: String(reason).slice(AUTO_RECOVERY_REASON_PREFIX.length) });
+  else outcome = c6Module().releaseGenericCancellation(state, { workerId, assignmentId });
+  if (!outcome.result?.ok) return outcome;
+  let next = outcome.state;
+  const releasedWorker = next.workers[workerId];
+  releasedWorker.lastCancellationAssignmentId = assignmentId;
+  releasedWorker.lastCancellationAt = at;
+  releasedWorker.lastCancellationReason = reason;
+  releasedWorker.lastCancellationTabId = tabId;
+  releasedWorker.lastCancellationDisposition = outcome.result.outcome || outcome.result.disposition || (kind === 'operator' ? 'cancelled' : 'requeued');
+  let eventType = 'assignment.cancelled';
+  if (kind === 'operator') eventType = 'assignment.operator_cancelled';
+  else if (kind === 'automatic-recovery') eventType = outcome.result.retryScheduled ? 'assignment.recovery_queued' : 'assignment.recovery_exhausted';
+  next = c6Journal(next, eventType, `${assignmentId} ${eventType.replace('assignment.', '')}`, {
+    workerId, assignmentId, reason, disposition: releasedWorker.lastCancellationDisposition,
+    retryScheduled: outcome.result.retryScheduled === true,
+  }, at);
+  replaceC3State(state, next);
+  return { result: { ...outcome.result, reason, kind } };
+}
+async function c6HandleAssignmentCancelledV2(tabId, message) {
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) return { ok: false, code: 'not-v2' };
+  const workerId = workerIdForTabInState(loaded, tabId);
+  if (!workerId) return { ok: false, code: 'worker-not-found', terminal: true, reportedAssignmentId: message?.assignmentId || null };
+  const assignmentId = String(message?.assignmentId || '').trim();
+  if (!assignmentId) return { ok: false, code: 'assignment-id-required', terminal: false };
+  const reason = String(message?.reason || '');
+  const at = now();
+  const committed = await mutateFleet((state) => c6ApplyCancellationInState(state, workerId, assignmentId, reason, at, tabId));
+  const result = committed.result || {};
+  if (result.retryScheduled) setTimeout(() => schedule().catch(() => {}), 1000);
+  else if (result.released || result.idempotent) schedule().catch(() => {});
+  return { ...result, ok: result.ok === true, assignmentId };
+}
+
+async function cancelWorkerDispatchC6(workerId) {
+  const initial = await loadFleetState();
+  if (initial.version !== 2) return cancelWorkerDispatchC5Legacy(workerId);
+  const worker = initial.workers[workerId];
+  if (!worker) throw new Error('worker not found');
+  const assignmentId = worker.currentAssignmentId;
+  if (!assignmentId) throw new Error('worker has no active dispatch');
+  if (initial.assignments[assignmentId]?.phase === 'completing') return { ok: false, code: 'completion-custody-protected', assignmentId, released: false, transportError: '' };
+  const tabId = worker.tabId;
+  if (!Number.isInteger(tabId)) return { ok: false, code: 'worker-tab-unbound', assignmentId, released: false, transportError: '' };
+  const requestAt = now();
+  const requested = await mutateFleet((state) => {
+    const current = state.workers[workerId];
+    const boundWorkerId = workerIdForTabInState(state, tabId);
+    const assignment = state.assignments[assignmentId];
+    if (!current || boundWorkerId !== workerId || current.tabId !== tabId) return { ok: false, code: 'stale-tab-rebound', assignmentId, tabId };
+    if (current.currentAssignmentId !== assignmentId || !assignment || assignment.workerId !== workerId) return { ok: false, code: 'stale-cancel-request', assignmentId };
+    if (assignment.phase === 'completing') return { ok: false, code: 'completion-custody-protected', assignmentId };
+    const next = c6Journal(state, 'assignment.cancel.requested', `${workerId} operator cancel requested for ${assignmentId}`, { assignmentId, tabId }, requestAt);
+    replaceC3State(state, next);
+    return { ok: true };
+  });
+  if (!requested.result?.ok) return { ...requested.result, assignmentId, released: false, transportError: '' };
+  const preSend = await mutateFleet((state) => {
+    const current = state.workers[workerId];
+    const boundWorkerId = workerIdForTabInState(state, tabId);
+    const assignment = state.assignments[assignmentId];
+    if (!current || boundWorkerId !== workerId || current.tabId !== tabId) return { ok: false, code: 'stale-tab-rebound', assignmentId, tabId };
+    if (current.currentAssignmentId !== assignmentId || !assignment || assignment.workerId !== workerId) return { ok: false, code: 'stale-cancel-before-send', assignmentId };
+    if (assignment.phase === 'completing') return { ok: false, code: 'completion-custody-protected', assignmentId };
+    return { ok: true };
+  });
+  if (!preSend.result?.ok) return { ...preSend.result, assignmentId, released: false, transportError: '' };
+  let transportError = '';
+  try {
+    const response = await Promise.race([
+      chrome.tabs.sendMessage(tabId, { type: 'fleet:cancel-current', reason: OPERATOR_CANCEL_REASON }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('worker cancellation acknowledgement timeout')), 10000)),
+    ]);
+    if (!response?.ok) throw new Error(response?.error || 'worker rejected cancellation');
+  } catch (error) {
+    transportError = String(error);
+  }
+  const settledAt = now();
+  const settled = await mutateFleet((state) => {
+    const outcome = c6ApplyCancellationInState(state, workerId, assignmentId, OPERATOR_CANCEL_REASON, settledAt, tabId, { allowHistoricalReceipt: true });
+    if (transportError) {
+      const next = c6Journal(state, 'assignment.cancel.transport_failed', `${workerId} local stop acknowledgement failed`, { assignmentId, tabId, error: transportError }, settledAt);
+      replaceC3State(state, next);
+    }
+    return outcome;
+  });
+  const result = settled.result || {};
+  if (result.released || result.idempotent) schedule().catch(() => {});
+  return { ok: result.ok === true, assignmentId, released: result.released === true || result.idempotent === true, disposition: result.disposition || result.outcome || null, transportError };
+}
+cancelWorkerDispatch = cancelWorkerDispatchC6;
 
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -4010,6 +4145,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (!Object.prototype.hasOwnProperty.call(changeInfo, 'url') && changeInfo.status !== 'complete') return;
   updateBadge(tabId).catch(() => {});
+
   if (changeInfo.status === 'complete') ensureApprovalBridge(tabId).catch(() => {});
 });
 
@@ -4035,3 +4171,2054 @@ reconcileStaleWorkerBindings('service worker load')
   .then((state) => startPendingChatRotations(state))
   .catch(() => {});
 ensureApprovalBridgesForSupportedTabs().catch(() => {});
+
+// C1 is an inert persistence-boundary candidate. C2+ will switch the
+// existing v1 scheduler/mutator call sites to this v2 authority.
+importScripts('fleet-state-model-m7-c1.js');
+importScripts('fleet-state-model-m7-c2.js');
+importScripts('fleet-state-model-m7-c3.js');
+
+// C2 v2 reservation overlay. The pre-existing function remains the explicit
+// C3+ legacy branch until dispatch attempt/acceptance and release are cut over.
+const chooseDispatchesC3Legacy = chooseDispatches;
+function adoptC2State(target, candidate) {
+  for (const key of Object.keys(target)) delete target[key];
+  for (const [key, value] of Object.entries(candidate)) target[key] = value;
+  return target;
+}
+
+function appendC2ReservationJournal(state, dispatches, observedAt) {
+  for (const dispatch of dispatches) {
+    const assignment = dispatch.assignment;
+    let type;
+    let text;
+    let detail;
+    if (assignment.kind === 'message') {
+      const ids = assignment.messageIds || [];
+      type = ids.length > 1 ? 'message.batch_reserved' : 'message.reserved';
+      text = ids.length > 1
+        ? `${ids.length} messages (${ids[0]}…${ids[ids.length - 1]}) reserved for ${dispatch.workerId}`
+        : `${ids[0]} reserved for ${dispatch.workerId}`;
+      detail = { assignmentId: assignment.id, messageIds: ids.slice(), count: ids.length };
+    } else if (assignment.kind === 'task') {
+      type = 'task.reserved';
+      text = `${assignment.taskId} reserved for ${dispatch.workerId}`;
+      detail = { assignmentId: assignment.id };
+    } else {
+      type = 'control.reserved';
+      text = `${assignment.controlNoticeIds?.length || 0} control notice(s) reserved for ${dispatch.workerId}`;
+      detail = { assignmentId: assignment.id, controlNoticeIds: (assignment.controlNoticeIds || []).slice() };
+    }
+    state.journal.push({
+      id: `${state.generation}:${state.journal.length + 1}:${observedAt}`,
+      at: observedAt,
+      type,
+      text,
+      detail,
+    });
+  }
+  if (state.journal.length > MAX_JOURNAL) state.journal.splice(0, state.journal.length - MAX_JOURNAL);
+}
+
+function c2ControlFeedbackText(notices) {
+  if (!notices.length) return '';
+  return [
+    '[MODEL FLEET CONTROL FEEDBACK]',
+    `Control notices: ${notices.length}`,
+    'These are scheduler/control-plane facts already in your durable worker inbox. Incorporate them while handling the current assignment; do not ask for a duplicate semantic message.',
+    ...notices.flatMap((notice) => [
+      `--- CONTROL ${notice.id} · ${notice.type || 'notice'}${notice.taskId ? ` · task ${notice.taskId}` : ''} ---`,
+      String(notice.body || '').trim(),
+      `--- END CONTROL ${notice.id} ---`,
+    ]),
+    '[/MODEL FLEET CONTROL FEEDBACK]',
+  ].join('\n');
+}
+
+function c2PeerSummary(state, workerId, observedAt) {
+  const c2 = globalThis.ModelFleetStateM7C2;
+  return Object.values(state.workers)
+    .filter(({ enabled, id, lifecycle, tabId }) => enabled !== false && id !== workerId && lifecycle !== 'stale' && Number.isInteger(tabId))
+    .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+    .map((worker) => {
+      const availability = c2.workerAvailability(state, worker.id, { now: observedAt });
+      const label = availability === 'blocked' ? 'blocked'
+        : availability === 'offline' ? 'offline'
+          : availability === 'running' ? 'running'
+            : availability === 'busy' ? 'waiting' : 'idle';
+      return `- ${workerIdentityLabel(state, worker)} (${label})`;
+    })
+    .join('\n') || '- no other registered workers';
+}
+
+function buildTaskPromptV2(state, inputs, observedAt) {
+  const task = inputs.task;
+  const worker = inputs.worker;
+  const taskContract = ROLE_CATALOG.find((role) => role.id === canonicalRole(task.role)) || ROLE_CATALOG[0];
+  const workerContract = ROLE_CATALOG.find((role) => role.id === canonicalRole(worker.role)) || ROLE_CATALOG[0];
+  const separationNote = canonicalRole(task.role) === 'coordinator'
+    ? 'Coordinator control loop only: decompose, route, observe, replan, and escalate. Do not perform specialist implementation, review, test, architecture, research, or integration work yourself.'
+    : 'Do not claim authority beyond this contract or verify work you completed yourself.';
+  return [
+    '[MODEL FLEET ASSIGNMENT]', `Worker: ${worker.id}`, `Role: ${worker.role}`,
+    `Requested task role: ${task.role}`, `Requested task contract purpose: ${taskContract.purpose}`,
+    `Registered worker authority scope: ${workerContract.authorityScope}`,
+    `Registered worker claim types: ${workerContract.claimTypes.join(', ')}`,
+    `Registered worker prohibited actions: ${workerContract.prohibitedActions.join('; ')}`,
+    `Registered worker allowed handoffs: ${workerContract.allowedHandoffs.join(', ')}`,
+    `Independent verification required: ${taskContract.requiresIndependentVerification ? 'yes' : 'no'}`,
+    `Separation of duty: ${separationNote}`, `Task: ${task.id} — ${task.title}`,
+    state.goal ? `Fleet goal: ${state.goal}` : 'Fleet goal: not set', '',
+    workspaceToolInstruction(String(state.workspacePath || '').trim()), '', task.prompt, '',
+    workerRoleOperatingPrompt(worker), '', c2ControlFeedbackText(inputs.controlNotices || []),
+    canonicalRole(task.role) === 'coordinator' ? coordinatorProtocolText() : '', '',
+    'Work independently and make concrete progress.', 'Do not wait for other workers unless the task genuinely depends on them.', '',
+    'Registered peers:', c2PeerSummary(state, worker.id, observedAt), '', fleetProtocolText(),
+    '[/MODEL FLEET ASSIGNMENT]',
+  ].join('\n');
+}
+
+function buildMessagePromptV2(state, inputs, observedAt) {
+  const worker = inputs.worker;
+  const messages = inputs.messages.slice().sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+  const blocks = messages.flatMap((message) => {
+    const from = message.fromWorkerId || message.from || 'operator';
+    return [`--- MESSAGE ${message.id} ---`, `From: ${senderIdentityLabel(state, from)}`,
+      message.taskId ? `Related task: ${message.taskId}` : 'Related task: none', '', message.body,
+      `--- END MESSAGE ${message.id} ---`, ''];
+  });
+  return [
+    '[MODEL FLEET MESSAGE]', `Recipient: ${workerIdentityLabel(state, worker)}`, `Batch size: ${messages.length}`,
+    messages.length > 1 ? 'Process every message in this batch in the listed order during this single turn. Preserve each message identity and satisfy all non-conflicting instructions; do not require one ChatGPT turn per message.' : 'Process the message below during this turn.',
+    '', workspaceToolInstruction(state.workspacePath), '', ...blocks, c2ControlFeedbackText(inputs.controlNotices || []),
+    'Respond by acting on all messages in this batch.', '', workerRoleOperatingPrompt(worker), '',
+    canonicalRole(worker.role) === 'coordinator' ? coordinatorProtocolText() : '', 'Registered peer routing targets:',
+    c2PeerSummary(state, worker.id, observedAt), 'Use only these exact worker IDs for peer delivery.', '', fleetProtocolText(),
+    '[/MODEL FLEET MESSAGE]',
+  ].join('\n');
+}
+
+function buildControlPromptV2(state, inputs, observedAt) {
+  const worker = inputs.worker;
+  return [
+    '[MODEL FLEET MESSAGE]', `Recipient: ${workerIdentityLabel(state, worker)}`, 'Batch size: 0 semantic messages', '',
+    workspaceToolInstruction(state.workspacePath), '', c2ControlFeedbackText(inputs.controlNotices || []), '',
+    'Act on the control feedback now. This control-plane inbox is separate from semantic peer traffic.', '',
+    workerRoleOperatingPrompt(worker), '', canonicalRole(worker.role) === 'coordinator' ? coordinatorProtocolText() : '',
+    '', 'Registered peer routing targets:', c2PeerSummary(state, worker.id, observedAt), '', fleetProtocolText(),
+    '[/MODEL FLEET MESSAGE]',
+  ].join('\n');
+}
+
+chooseDispatches = function chooseDispatchesC2Candidate(state) {
+  if (state?.version !== 2) return chooseDispatchesC3Legacy(state);
+  const c2 = globalThis.ModelFleetStateM7C2;
+  if (!c2) throw new Error('M7 C2 reservation boundary unavailable');
+  const observedAt = now();
+  const result = c2.chooseDispatchesV2(state, {
+    now: observedAt,
+    promptBuilders: {
+      task: (inputs, promptState) => buildTaskPromptV2(promptState, inputs, observedAt),
+      message: (inputs, promptState) => buildMessagePromptV2(promptState, inputs, observedAt),
+      control: (inputs, promptState) => buildControlPromptV2(promptState, inputs, observedAt),
+    },
+  });
+  adoptC2State(state, result.state);
+  appendC2ReservationJournal(state, result.dispatches, observedAt);
+  return result.dispatches;
+};
+
+// C2 v2 scheduling bypasses the v1 status/busy preflight. C3+ retains the
+// original scheduler for v1 candidates until the remaining authority families
+// are cut over.
+const scheduleC3Legacy = schedule;
+schedule = async function scheduleC2Candidate() {
+  const preview = await loadFleetState();
+  if (preview.version !== 2) return scheduleC3Legacy();
+  if (fleetBridgeRecoveryPromise) {
+    schedulePending = true;
+    return;
+  }
+  if (scheduling) {
+    schedulePending = true;
+    return;
+  }
+  scheduling = true;
+  try {
+    await mutateFleet((state) => chooseDispatches(state));
+  } finally {
+    scheduling = false;
+    if (schedulePending) {
+      schedulePending = false;
+      queueMicrotask(() => schedule().catch(() => {}));
+    }
+  }
+};
+
+// C3 v2 dispatch transport overlay. Later C4 slices own heartbeat, recovery,
+// completion, cancellation, and flush; this boundary stops at acceptance.
+const scheduleC2ReservationOnly = schedule;
+function replaceC3State(target, candidate) {
+  for (const key of Object.keys(target)) delete target[key];
+  Object.assign(target, candidate);
+}
+async function dispatchReservedC3Candidate(dispatch) {
+  const c3 = globalThis.ModelFleetStateM7C3;
+  const attemptedAt = now();
+  try {
+    await mutateFleet((state) => {
+      const authorization = c3.authorizeDispatch(state, dispatch);
+      if (!authorization.ok) throw new Error(`M7 C3 ${authorization.reason}`);
+      let next = c3.recordDispatchAttempt(state, { workerId: dispatch.workerId, assignmentId: dispatch.assignment.id, attemptedAt });
+      next = c3.appendJournal(next, 'dispatch.attempt', `${dispatch.assignment.id} → ${dispatch.workerId}`, { workerId: dispatch.workerId, tabId: dispatch.tabId, kind: dispatch.assignment.kind }, attemptedAt);
+      replaceC3State(state, next);
+    });
+    await clearWarmIdleAlarm(dispatch.workerId);
+    const pageActivity = await readFleetPageActivity(dispatch.tabId);
+    if (pageActivity.busy) {
+      const deferredAt = now();
+      await mutateFleet((state) => {
+        const deferC3 = c3['defer' + 'ReservedDispatchForActivePage'];
+        const deferInput = { workerId: dispatch.workerId, assignmentId: dispatch.assignment.id, deferredAt };
+        deferInput['page' + 'BusyUntil'] = deferredAt + FLEET_PAGE_BUSY_RECHECK_MS;
+        let next = deferC3(state, deferInput);
+        next = c3.appendJournal(next, 'dispatch.deferred_active_turn', `${dispatch.workerId} still has an active ChatGPT turn; ${dispatch.assignment.id} was not sent`, { assignmentId: dispatch.assignment.id, tabId: dispatch.tabId }, deferredAt);
+        replaceC3State(state, next);
+      });
+      setTimeout(() => schedule().catch(() => {}), FLEET_PAGE_BUSY_RECHECK_MS);
+      return;
+    }
+    const wakeState = await loadFleetState();
+    const wakeAuthorization = c3.authorizeDispatch(wakeState, dispatch);
+    if (!wakeAuthorization.ok) throw new Error(`M7 C3 stale-before-wake: ${wakeAuthorization.reason}`);
+    if (wakeState.policy.activeWorkerWindows) {
+      const stable = await ensureWorkerWindow(dispatch.workerId);
+      const wakeAt = now();
+      await mutateFleet((state) => {
+        const authorization = c3.authorizeDispatch(state, dispatch);
+        if (!authorization.ok) throw new Error(`M7 C3 stale-during-wake: ${authorization.reason}`);
+        let next = c3.appendJournal(state, 'worker.wake', `${dispatch.workerId} activated in persistent window ${stable.windowId} for ${dispatch.assignment.id}`, { assignmentId: dispatch.assignment.id, windowId: stable.windowId }, wakeAt);
+        next.workers[dispatch.workerId].windowId = stable.windowId;
+        next.workers[dispatch.workerId].activeWindowId = stable.windowId;
+        replaceC3State(state, next);
+      });
+      await chrome.tabs.update(dispatch.tabId, { active: true });
+    }
+    await waitForTabReady(dispatch.tabId);
+    await ensureFleetBridgeAfterWake(dispatch.tabId);
+    const sendState = await loadFleetState();
+    const sendAuthorization = c3.authorizeDispatch(sendState, dispatch);
+    if (!sendAuthorization.ok) throw new Error(`M7 C3 stale-before-send: ${sendAuthorization.reason}`);
+    const response = await Promise.race([
+      chrome.tabs.sendMessage(dispatch.tabId, { type: 'fleet:execute-assignment', assignment: dispatch.assignment }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('worker dispatch acknowledgement timeout')), 10000)),
+    ]);
+    if (!response?.ok) throw new Error(response?.error || 'worker rejected assignment');
+    const acceptedAt = now();
+    await mutateFleet((state) => {
+      const authorization = c3.authorizeDispatch(state, dispatch);
+      if (!authorization.ok) throw new Error(`M7 C3 stale acknowledgement: ${authorization.reason}`);
+      let next = c3.acceptDispatch(state, { workerId: dispatch.workerId, assignmentId: dispatch.assignment.id, acceptedAt });
+      const worker = next.workers[dispatch.workerId];
+      worker.lastDispatchError = '';
+      worker.dispatchFailureCount = 0;
+      worker.lastDispatchFailureAt = 0;
+      if (worker.lastCountedAssignmentId !== dispatch.assignment.id) {
+        worker.lastCountedAssignmentId = dispatch.assignment.id;
+        worker.chatTurnCount = Math.max(0, Math.trunc(Number(worker.chatTurnCount || 0))) + 1;
+        const limit = maxTurnsPerChatForRole(next.topology, worker.role);
+        if (worker.chatTurnCount >= limit) {
+          worker['chat' + 'RotationPending'] = true;
+          next = c3.appendJournal(next, 'worker.chat_limit_reached', `${dispatch.workerId} reached ${worker.chatTurnCount}/${limit} turns`, { assignmentId: dispatch.assignment.id, turns: worker.chatTurnCount, limit }, acceptedAt);
+        }
+      }
+      next = c3.appendJournal(next, 'dispatch.accepted', `${dispatch.assignment.id} accepted by ${dispatch.workerId}`, { workerId: dispatch.workerId, tabId: dispatch.tabId }, acceptedAt);
+      if (dispatch.assignment.kind === 'message') {
+        const ids = dispatch.assignment.messageIds || [];
+        const text = ids.length > 1 ? `${ids.length} messages (${ids[0]}…${ids[ids.length - 1]}) sent to ${dispatch.workerId}` : `${ids[0]} sent to ${dispatch.workerId}`;
+        next = c3.appendJournal(next, ids.length > 1 ? 'message.batch_sent' : 'message.sent', text, { assignmentId: dispatch.assignment.id, messageIds: ids, count: ids.length }, acceptedAt);
+      } else if (dispatch.assignment.kind === 'task') {
+        next = c3.appendJournal(next, 'task.started', `${dispatch.assignment.taskId} started by ${dispatch.workerId}`, { assignmentId: dispatch.assignment.id }, acceptedAt);
+      } else {
+        next = c3.appendJournal(next, 'control.started', `${dispatch.assignment.controlNoticeIds?.length || 0} control notice(s) started by ${dispatch.workerId}`, { assignmentId: dispatch.assignment.id, controlNoticeIds: dispatch.assignment.controlNoticeIds || [] }, acceptedAt);
+      }
+      replaceC3State(state, next);
+    });
+  } catch (error) {
+    const failureAt = now();
+    await mutateFleet((state) => {
+      const durableWorker = state.workers[dispatch.workerId];
+      const durableAssignment = state.assignments[dispatch.assignment.id];
+      if (!durableWorker || !durableAssignment || durableWorker.currentAssignmentId !== dispatch.assignment.id || durableAssignment.workerId !== dispatch.workerId) {
+        return;
+      }
+      if (durableAssignment.phase !== 'reserved') {
+        return;
+      }
+      if (durableAssignment.dispatchAttemptAt === 0) {
+        const rolledBack = c3.rollbackReservedDispatch(state, { workerId: dispatch.workerId, assignmentId: dispatch.assignment.id });
+        if (!rolledBack.result.stale) replaceC3State(state, rolledBack.state);
+        return;
+      }
+      const diagnosticError = String(error);
+      const typedFaultSource = error && typeof error.message === 'string' ? error.message : (typeof error === 'string' ? error : '');
+      const typedFaultMessage = String(typedFaultSource || 'dispatch failed').slice(0, 2000);
+      const result = c3.composeDispatchFailure(state, { workerId: dispatch.workerId, assignmentId: dispatch.assignment.id, at: failureAt, message: typedFaultMessage });
+      if (result.result.stale) return;
+      const worker = result.state.workers[dispatch.workerId];
+      if (worker) {
+        worker.lastDispatchError = diagnosticError;
+        worker.dispatchFailureCount = Math.max(0, Math.trunc(Number(worker.dispatchFailureCount || 0))) + 1;
+        worker.lastDispatchFailureAt = failureAt;
+        if (result.result.lifecycleIntent) {
+          worker['life' + 'cycle'] = result.result.lifecycleIntent.lifecycle;
+          worker['warm' + 'IdleSince'] = result.result.lifecycleIntent.warmIdleSince;
+          worker['warm' + 'IdleUntil'] = result.result.lifecycleIntent.warmIdleUntil;
+        }
+      }
+      if (dispatch.assignment.kind === 'task' && result.state.tasks[dispatch.assignment.taskId]) result.state.tasks[dispatch.assignment.taskId].statusNote = `dispatch failed on ${dispatch.workerId}: ${diagnosticError}`;
+      for (const id of dispatch.assignment.messageIds || []) {
+        const message = result.state.messages.find((candidate) => candidate.id === id);
+        if (message) {
+          message.lastDispatchError = diagnosticError;
+          message.dispatchFailureCount = Math.max(0, Math.trunc(Number(message.dispatchFailureCount || 0))) + 1;
+          message.lastDeferredReason = `target worker blocked after dispatch failure: ${diagnosticError}`;
+        }
+      }
+      const detail = { error: diagnosticError, workerBlocked: result.result.workerBlocked, messageIds: dispatch.assignment.messageIds || [] };
+      replaceC3State(state, c3.appendJournal(result.state, 'dispatch.failed', `${dispatch.assignment.id} failed: ${diagnosticError}`, detail, failureAt));
+    });
+  } finally {
+    schedule().catch(() => {});
+  }
+}
+
+const scheduleC3ReservationTransport = schedule;
+schedule = async function scheduleC3Candidate() {
+  const preview = await loadFleetState();
+  if (preview.version !== 2) return scheduleC3ReservationTransport();
+  if (fleetBridgeRecoveryPromise || scheduling) { schedulePending = true; return; }
+  scheduling = true;
+  let dispatches = [];
+  try {
+    const committed = await mutateFleet((state) => {
+      const dispatches = chooseDispatches(state);
+      return dispatches;
+    });
+    dispatches = Array.isArray(committed.result) ? committed.result : [];
+  } finally {
+    scheduling = false;
+    if (schedulePending) { schedulePending = false; queueMicrotask(() => schedule().catch(() => {})); }
+  }
+  for (const dispatch of dispatches) dispatchReservedC3Candidate(dispatch).catch(() => {});
+};
+
+// C4 v2 heartbeat/bridge overlay. Completion, cancellation, flush/stop, and
+// public projection remain later bounded slices.
+importScripts('fleet-state-model-m7-c4.js');
+const flushWorkerHeartbeatsC3Legacy = flushWorkerHeartbeats;
+const updateWorkerHeartbeatC3Legacy = updateWorkerHeartbeat;
+const reconcileOnHelloC3Legacy = reconcileOnHello;
+const recoverRegisteredWorkerBridgeC3Legacy = recoverRegisteredWorkerBridge;
+function c4HeartbeatObservation(workerId, heartbeat) {
+  const hasAssignmentIdentity = Object.prototype.hasOwnProperty.call(heartbeat, 'activeAssignmentId');
+  const observation = {
+    workerId,
+    observedAt: heartbeat.at,
+    busy: heartbeat.busy === true,
+    hasAssignmentIdentity,
+  };
+  if (hasAssignmentIdentity) observation.reportedAssignmentId = heartbeat.activeAssignmentId;
+  for (const key of ['title', 'url', 'windowId']) if (Object.prototype.hasOwnProperty.call(heartbeat, key)) observation[key] = heartbeat[key];
+  return observation;
+}
+flushWorkerHeartbeats = async function flushWorkerHeartbeatsC4() {
+  const preview = await loadFleetState();
+  if (preview.version !== 2) return flushWorkerHeartbeatsC3Legacy();
+  if (heartbeatFlushPromise) return heartbeatFlushPromise;
+  const batch = new Map(liveHeartbeats);
+  if (!batch.size) return { scheduleNeeded: false };
+  const operation = (async () => {
+    let scheduleNeeded = false;
+    const committed = await mutateFleet((state) => {
+      let next = state;
+      for (const [workerId, heartbeat] of batch) {
+        if (!next.workers[workerId]) continue;
+        const before = next.workers[workerId];
+        const result = globalThis.ModelFleetStateM7C4.processHeartbeat(next, c4HeartbeatObservation(workerId, heartbeat));
+        next = result.state;
+        const after = next.workers[workerId];
+        scheduleNeeded = scheduleNeeded || result.result.scheduleNeeded === true
+          || (before.runtime.busy === true && after?.runtime.busy === false && after.currentAssignmentId == null);
+      }
+      replaceC3State(state, next);
+      return { scheduleNeeded };
+    });
+    for (const [workerId, heartbeat] of batch) {
+      const current = liveHeartbeats.get(workerId);
+      if (current && current.at <= heartbeat.at) liveHeartbeats.delete(workerId);
+    }
+    lastHeartbeatFlushAt = now();
+    return { state: committed.state, scheduleNeeded };
+  })();
+  heartbeatFlushPromise = operation.finally(() => { heartbeatFlushPromise = null; });
+  return heartbeatFlushPromise;
+};
+updateWorkerHeartbeat = async function updateWorkerHeartbeatC4(tab, payload) {
+  const state = await loadFleetState();
+  if (state.version !== 2) return updateWorkerHeartbeatC3Legacy(tab, payload);
+  const observedAt = now();
+  const workerId = workerIdForTabInState(state, tab.id);
+  if (!workerId) return { observedAt, registered: false };
+  liveHeartbeats.set(workerId, {
+    at: observedAt,
+    busy: payload.busy === true,
+    title: tab.title || '',
+    url: tab.url || '',
+    windowId: Number.isInteger(tab.windowId) ? tab.windowId : null,
+  });
+  if (Object.prototype.hasOwnProperty.call(payload, 'activeAssignmentId')) {
+    liveHeartbeats.get(workerId).activeAssignmentId = (typeof payload.activeAssignmentId === 'string' ? payload.activeAssignmentId.trim() : '') || null;
+  }
+  if (observedAt - lastHeartbeatFlushAt >= HEARTBEAT_FLUSH_MS) {
+    const result = await flushWorkerHeartbeats();
+    if (result?.scheduleNeeded) schedule().catch(() => {});
+  }
+  return { observedAt, registered: true };
+};
+reconcileOnHello = async function reconcileOnHelloC4(tab, payload = {}) {
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) return reconcileOnHelloC3Legacy(tab, payload);
+  const workerId = workerIdForTabInState(loaded, tab.id);
+  if (!workerId) return { registered: false, worker: null };
+  const hasAssignmentIdentity = Object.prototype.hasOwnProperty.call(payload, 'activeAssignmentId');
+  const observedAt = now();
+  const committed = await mutateFleet((state) => {
+    const recoveryInput = {
+      workerId,
+      observedAt,
+      hasAssignmentIdentity,
+      reattached: false,
+      promptProof: false,
+      pendingCompletionProof: false,
+    };
+    if (hasAssignmentIdentity) recoveryInput.reportedAssignmentId = (typeof payload.activeAssignmentId === 'string' ? payload.activeAssignmentId.trim() : '') || null;
+    if (Object.prototype.hasOwnProperty.call(payload, 'busy')) recoveryInput.busy = payload.busy;
+    const result = globalThis.ModelFleetStateM7C4.reconcileRecoveryCustody(state, recoveryInput);
+    const next = result.state;
+    const worker = next.workers[workerId];
+    worker.title = tab.title || worker.title;
+    worker.url = tab.url || worker.url;
+    if (Number.isInteger(tab.windowId)) worker.windowId = tab.windowId;
+    replaceC3State(state, next);
+    return result.result;
+  });
+  const buffered = liveHeartbeats.get(workerId);
+  if (buffered && buffered.at <= observedAt) liveHeartbeats.delete(workerId);
+  return { registered: true, worker: committed.state.workers[workerId], recovery: committed.result };
+};
+recoverRegisteredWorkerBridge = async function recoverRegisteredWorkerBridgeC4(workerId, reason = 'extension context recovery') {
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) return recoverRegisteredWorkerBridgeC3Legacy(workerId, reason);
+  const worker = loaded.workers[workerId];
+  if (!worker?.enabled || !Number.isInteger(worker.tabId)) return { workerId, recovered: false, skipped: true };
+  const tab = await supportedTab(worker.tabId);
+  if (!tab) return { workerId, recovered: false, stale: true };
+  const assignment = globalThis.ModelFleetStateM7C4.recoveryPayloadV2(loaded, worker.currentAssignmentId);
+  const assignmentRecord = assignment.assignment;
+  await setFleetRecoveryHint(worker.tabId, assignmentRecord?.id || null);
+  try {
+    await ensureFleetBridge(worker.tabId);
+    let response = { ok: true, assignmentId: assignmentRecord?.id || null, reattached: false };
+    if (assignmentRecord) {
+      let prompt = '';
+      if (assignmentRecord.kind === 'task') prompt = buildTaskPromptV2(loaded, assignment.promptInputs, now());
+      else if (assignmentRecord.kind === 'message') prompt = buildMessagePromptV2(loaded, assignment.promptInputs, now());
+      else prompt = buildControlPromptV2(loaded, assignment.promptInputs, now());
+      response = await chrome.tabs.sendMessage(worker.tabId, { type: 'fleet:recover-assignment', assignment: { ...assignmentRecord, prompt } });
+    }
+    const observedAt = now();
+    const result = await mutateFleet((state) => {
+      const recoveryInput = {
+        workerId,
+        observedAt,
+        hasAssignmentIdentity: !!assignmentRecord,
+        reattached: response.reattached === true,
+        promptProof: response.alreadyActive === true || response.streaming === true || response.promptObserved === true,
+        pendingCompletionProof: response.recoveringCompletion === true,
+        unrecoverable: response.ok !== true || response.unrecoverable === true,
+      };
+      if (assignmentRecord) recoveryInput.reportedAssignmentId = typeof response.assignmentId === 'string' ? response.assignmentId : null;
+      if (Object.prototype.hasOwnProperty.call(response, 'busy')) recoveryInput.busy = response.busy;
+      const outcome = globalThis.ModelFleetStateM7C4.reconcileRecoveryCustody(state, recoveryInput);
+      let next = outcome.state;
+      if (outcome.result.ok === true && ['reattached-running', 'reattached', 'completion-reattached', 'no-owner'].includes(outcome.result.outcome)) {
+        const cleared = globalThis.ModelFleetStateM7C4.clearFaultWithEvidence(next, workerId, {
+          success: true,
+          kind: 'm4-recovery',
+          workerId,
+          at: observedAt,
+          recoveryInput,
+          result: outcome.result,
+        });
+        next = cleared.state;
+      }
+      next = globalThis.ModelFleetStateM7C3.appendJournal(next, 'worker.bridge_recovered', `${workerId} bridge recovery reconciled`, { assignmentId: assignmentRecord?.id || null, outcome: outcome.result.outcome || outcome.result.code || null }, observedAt);
+      replaceC3State(state, next);
+      return outcome.result;
+    });
+    if (['reattached-running', 'reattached', 'completion-reattached', 'no-owner', 'unrecoverable-released'].includes(result.result.outcome)) await setFleetRecoveryHint(worker.tabId, null);
+    return { workerId, recovered: result.result.ok === true, assignmentId: assignmentRecord?.id || null, recovery: result.result };
+  } catch (error) {
+    const fresh = await loadFleetState().catch(() => null);
+    const current = fresh?.workers?.[workerId];
+    const originalId = assignmentRecord?.id || null;
+    if (!current) return { workerId, recovered: false, stale: true, error: String(error) };
+    if (originalId == null && current.currentAssignmentId == null) {
+      await setFleetRecoveryHint(worker.tabId, null).catch(() => {});
+      return { workerId, recovered: false, stale: true, error: String(error) };
+    }
+    if (current.currentAssignmentId !== originalId) return { workerId, recovered: false, stale: true, error: String(error) };
+    const currentAssignment = fresh.assignments[originalId];
+    if (!currentAssignment || currentAssignment.phase === 'completing') return { workerId, recovered: false, stale: currentAssignment?.phase !== 'completing', error: String(error) };
+    const released = await mutateFleet((state) => {
+      const outcome = globalThis.ModelFleetStateM7C4.reconcileRecoveryCustody(state, { workerId, observedAt: now(), hasAssignmentIdentity: false, unrecoverable: true });
+      let next = globalThis.ModelFleetStateM7C3.appendJournal(outcome.state, 'assignment.bridge_recovery_failed', `${originalId} bridge recovery failed`, { workerId, reason: String(error) }, now());
+      replaceC3State(state, next);
+      return outcome.result;
+    }).catch(() => null);
+    if (released?.result?.outcome === 'unrecoverable-released' || released?.outcome === 'unrecoverable-released') await setFleetRecoveryHint(worker.tabId, null).catch(() => {});
+    return { workerId, recovered: false, released: !!released, error: String(error) };
+  }
+};
+
+// C5 v2 completion overlay. Result routing, terminal disposition, and
+// custody acknowledgement are intentionally kept after the C4 boundary.
+importScripts('fleet-state-model-m7-c5.js');
+importScripts('fleet-state-model-m7-c6.js');
+importScripts('fleet-state-model-m7-c7.js');
+importScripts('fleet-state-model-m7-c8.js');
+importScripts('fleet-state-model-m7-c9.js');
+const stopAndFlushStaleWorkC6Legacy = stopAndFlushStaleWork;
+const C7_STOP_TRANSPORT_TIMEOUT_MS = 10000;
+function c7Module() { return globalThis.ModelFleetStateM7C7; }
+async function c7RecordTransportWarning(result, warning) {
+  result.transportWarnings.push(warning);
+  try {
+    await mutateFleet((state) => {
+      const next = globalThis.ModelFleetStateM7C3.appendJournal(state, 'assignment.flush.transport_failed', `${warning.assignmentId} stale stop transport warning`, warning, now());
+      replaceC3State(state, next);
+    });
+  } catch (error) {
+    result.transportWarnings.push({ ...warning, stage: 'diagnostic-journal', error: String(error) });
+  }
+}
+async function c7SendStopWithTimeout(tabId, payload) {
+  let timer;
+  try {
+    return await Promise.race([
+      chrome.tabs.sendMessage(tabId, payload),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('stale stop transport timeout')), C7_STOP_TRANSPORT_TIMEOUT_MS); }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+async function stopAndFlushStaleWorkC7() {
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) return stopAndFlushStaleWorkC6Legacy();
+  const stopAt = now();
+  const committed = await mutateFleet((state) => {
+    const composed = c7Module().composeStopAndFlushV2(state, { at: stopAt });
+    replaceC3State(state, composed.state);
+    return composed.result;
+  });
+  const result = { ...committed.result, transportWarnings: [] };
+  for (const intent of committed.result.transportIntents || []) {
+    try {
+      await clearWarmIdleAlarm(intent.workerId);
+    } catch (error) {
+      await c7RecordTransportWarning(result, { workerId: intent.workerId, assignmentId: intent.assignmentId, tabId: intent.tabId, stage: 'warm-idle-alarm-clear', error: String(error) });
+    }
+    let current;
+    try {
+      current = await loadFleetState();
+    } catch (error) {
+      await c7RecordTransportWarning(result, { workerId: intent.workerId, assignmentId: intent.assignmentId, tabId: intent.tabId, stage: 'pre-send-state-read', error: String(error) });
+      continue;
+    }
+    const worker = current.workers[intent.workerId];
+    if (!current.policy.paused || !worker || worker.tabId !== intent.tabId || worker.currentAssignmentId != null) continue;
+    try {
+      await c7SendStopWithTimeout(intent.tabId, { type: 'fleet:cancel-current', reason: 'stale work stop', expectedAssignmentId: intent.assignmentId });
+    } catch (error) {
+      const stage = String(error).includes('timeout') ? 'send-timeout' : 'send-failed';
+      await c7RecordTransportWarning(result, { workerId: intent.workerId, assignmentId: intent.assignmentId, tabId: intent.tabId, stage, error: String(error) });
+    }
+  }
+  delete result.transportIntents;
+  return result;
+}
+stopAndFlushStaleWork = stopAndFlushStaleWorkC7;
+const killAuthorityC8Legacy = killAuthority;
+const C8_AUTHORITY_REVOKE_TRANSPORT_TIMEOUT_MS = C7_STOP_TRANSPORT_TIMEOUT_MS;
+function c8Module() { return globalThis.ModelFleetStateM7C8; }
+async function c8RecordTransportWarning(result, warning) {
+  result.transportWarnings.push(warning);
+  try {
+    await mutateFleet((state) => {
+      const next = globalThis.ModelFleetStateM7C3.appendJournal(state, 'assignment.kill.transport_failed', `${warning.assignmentId} authority revoke transport warning`, warning, now());
+      replaceC3State(state, next);
+    });
+  } catch (error) {
+    result.transportWarnings.push({ ...warning, stage: 'diagnostic-journal', error: String(error) });
+  }
+}
+async function c8SendAuthorityStopWithTimeout(tabId, payload) {
+  let timer;
+  try {
+    return await Promise.race([
+      chrome.tabs.sendMessage(tabId, payload),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('authority revoke transport timeout')), C8_AUTHORITY_REVOKE_TRANSPORT_TIMEOUT_MS); }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+async function killAuthorityC8() {
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) return killAuthorityC8Legacy();
+  const revokeAt = now();
+  const committed = await mutateFleet((state) => {
+    const composed = c8Module().composeAuthorityRevokeV2(state, { at: revokeAt });
+    replaceC3State(state, composed.state);
+    return composed.result;
+  });
+  const result = { ...committed.result, transportWarnings: [] };
+  for (const intent of committed.result.transportIntents || []) {
+    try {
+      await clearWarmIdleAlarm(intent.workerId);
+    } catch (error) {
+      await c8RecordTransportWarning(result, { workerId: intent.workerId, assignmentId: intent.assignmentId, tabId: intent.tabId, stage: 'warm-idle-alarm-clear', error: String(error) });
+    }
+    let current;
+    try {
+      current = await loadFleetState();
+    } catch (error) {
+      await c8RecordTransportWarning(result, { workerId: intent.workerId, assignmentId: intent.assignmentId, tabId: intent.tabId, stage: 'pre-send-state-read', error: String(error) });
+      continue;
+    }
+    const worker = current.workers[intent.workerId];
+    if (current.policy.authorityEnabled !== false || current.policy.paused !== true || !worker || worker.tabId !== intent.tabId || worker.currentAssignmentId != null) continue;
+    try {
+      await c8SendAuthorityStopWithTimeout(intent.tabId, { type: 'fleet:cancel-current', reason: 'authority revoked', expectedAssignmentId: intent.assignmentId });
+    } catch (error) {
+      const stage = String(error).includes('timeout') ? 'send-timeout' : 'send-failed';
+      await c8RecordTransportWarning(result, { workerId: intent.workerId, assignmentId: intent.assignmentId, tabId: intent.tabId, stage, error: String(error) });
+    }
+  }
+  delete result.transportIntents;
+  return result;
+}
+killAuthority = killAuthorityC8;
+const markWorkerBindingStaleC9Legacy = markWorkerBindingStale;
+const reconcileStaleWorkerBindingsC9Legacy = reconcileStaleWorkerBindings;
+const unregisterWorkerC9Legacy = unregisterWorker;
+const C9_UNREGISTER_TRANSPORT_TIMEOUT_MS = C7_STOP_TRANSPORT_TIMEOUT_MS;
+function c9Module() { return globalThis.ModelFleetStateM7C9; }
+async function c9BoundedCleanup(label, operation) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(operation),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label}-timeout`)), C9_UNREGISTER_TRANSPORT_TIMEOUT_MS); }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+function c9CleanupWarning(stage, error, detail = {}) {
+  return { ...detail, stage, error: String(error) };
+}
+async function c9MarkWorkerBindingStale(tabId, reason = 'tab closed') {
+  if (!Number.isInteger(tabId)) return { stale: false, code: 'invalid-tab-id' };
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) return markWorkerBindingStaleC9Legacy(tabId, reason);
+  const at = now();
+  const committed = await mutateFleet((state) => {
+    const workerId = workerIdForTabInState(state, tabId);
+    if (!workerId) return { stale: false, code: 'worker-not-found' };
+    const outcome = c9Module().releaseWorkerBindingV2(state, { workerId, expectedTabId: tabId, reason, at });
+    if (outcome.result.transitioned) replaceC3State(state, outcome.state);
+    return outcome.result;
+  });
+  if (committed.result?.transitioned) {
+    const cleanupWarnings = [];
+    liveHeartbeats.delete(committed.result.workerId);
+    schedule().catch(() => {});
+    try { await c9BoundedCleanup('warm-idle-alarm-clear', () => clearWarmIdleAlarm(committed.result.workerId)); }
+    catch (error) { cleanupWarnings.push(c9CleanupWarning(String(error).includes('timeout') ? 'warm-idle-alarm-clear-timeout' : 'warm-idle-alarm-clear-failed', error, { workerId: committed.result.workerId })); }
+    committed.result.cleanupWarnings = cleanupWarnings;
+  }
+  return committed.result;
+}
+async function c9ReconcileStaleWorkerBindings(reason = 'binding reconciliation') {
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) return reconcileStaleWorkerBindingsC9Legacy(reason);
+  const candidates = Object.values(loaded.workers).filter((worker) => worker.enabled && Number.isInteger(worker.tabId));
+  const supported = await Promise.all(candidates.map(async (worker) => ({ workerId: worker.id, expectedTabId: worker.tabId, supported: Boolean(await supportedTab(worker.tabId)) })));
+  const unsupported = supported.filter((item) => !item.supported);
+  if (!unsupported.length) return { stale: [], protectedCompleting: [] };
+  const at = now();
+  const committed = await mutateFleet((state) => {
+    const stale = [];
+    const protectedCompleting = [];
+    for (const candidate of unsupported) {
+      const worker = state.workers[candidate.workerId];
+      if (!worker || worker.enabled !== true || worker.tabId !== candidate.expectedTabId) continue;
+      const outcome = c9Module().releaseWorkerBindingV2(state, { workerId: candidate.workerId, expectedTabId: candidate.expectedTabId, reason, at });
+      if (!outcome.result.transitioned) continue;
+      replaceC3State(state, outcome.state);
+      stale.push(candidate.workerId);
+      if (outcome.result.protectedCompleting) protectedCompleting.push(outcome.result.protectedCompleting);
+    }
+    return { stale, protectedCompleting };
+  });
+  const cleanupWarnings = [];
+  schedule().catch(() => {});
+  for (const workerId of committed.result.stale || []) {
+    liveHeartbeats.delete(workerId);
+    try { await c9BoundedCleanup('warm-idle-alarm-clear', () => clearWarmIdleAlarm(workerId)); }
+    catch (error) { cleanupWarnings.push(c9CleanupWarning(String(error).includes('timeout') ? 'warm-idle-alarm-clear-timeout' : 'warm-idle-alarm-clear-failed', error, { workerId })); }
+  }
+  committed.result.cleanupWarnings = cleanupWarnings;
+  return committed.result;
+}
+async function c9UnregisterWorker(workerId) {
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) return unregisterWorkerC9Legacy(workerId);
+  const at = now();
+  const committed = await mutateFleet((state) => {
+    const outcome = c9Module().unregisterWorkerV2(state, { workerId, at });
+    if (outcome.result.removed) replaceC3State(state, outcome.state);
+    return outcome.result;
+  });
+  const result = { ...committed.result, transportWarnings: committed.result?.transportWarnings || [] };
+  if (!result.removed) return result;
+  liveHeartbeats.delete(workerId);
+  schedule().catch(() => {});
+  try { await c9BoundedCleanup('warm-idle-alarm-clear', () => clearWarmIdleAlarm(workerId)); }
+  catch (error) { result.transportWarnings.push(c9CleanupWarning(String(error).includes('timeout') ? 'warm-idle-alarm-clear-timeout' : 'warm-idle-alarm-clear-failed', error, { workerId })); }
+  if (Number.isInteger(result.tabId)) {
+    try { await c9BoundedCleanup('badge-update', () => updateBadge(result.tabId)); }
+    catch (error) { result.transportWarnings.push(c9CleanupWarning(String(error).includes('timeout') ? 'badge-update-timeout' : 'badge-update-failed', error, { workerId, tabId: result.tabId })); }
+  }
+  if (Number.isInteger(result.tabId)) {
+    let current = null;
+    try { current = await c9BoundedCleanup('pre-send-state-read', () => loadFleetState()); }
+    catch (error) {
+      result.transportWarnings.push(c9CleanupWarning('pre-send-state-read', error, { workerId, tabId: result.tabId }));
+      current = null;
+    }
+    if (current && !Object.values(current.workers || {}).some((worker) => worker.tabId === result.tabId)) {
+      try {
+        await c7SendStopWithTimeout(result.tabId, { type: 'fleet:registration-changed', registered: false, expectedWorkerId: workerId });
+      } catch (error) {
+        const stage = String(error).includes('timeout') ? 'send-timeout' : 'send-failed';
+        result.transportWarnings.push(c9CleanupWarning(stage, error, { workerId, tabId: result.tabId }));
+      }
+    }
+  }
+  return result;
+}
+markWorkerBindingStale = c9MarkWorkerBindingStale;
+reconcileStaleWorkerBindings = c9ReconcileStaleWorkerBindings;
+unregisterWorker = c9UnregisterWorker;
+const completeAssignmentC4Legacy = completeAssignment;
+function c5Journal(state, type, text, detail, at) {
+  return globalThis.ModelFleetStateM7C3.appendJournal(state, type, text, detail, at);
+}
+function c5JournalInPlace(state, type, text, detail, at) {
+  replaceC3State(state, c5Journal(state, type, text, detail, at));
+  return state;
+}
+function c5QueueMessage(state, input, at) {
+  if (!Number.isFinite(at) || at <= 0) throw new Error('completion message createdAt must be positive');
+  let id;
+  do { id = `M-${state.nextMessage++}`; } while (state.messages.some((message) => message.id === id));
+  const operator = input.toWorkerId === 'operator';
+  if (!operator && (!state.workers[input.toWorkerId] || input.toWorkerId === 'operator')) throw new Error('message-target-not-found');
+  const protocolRepairAttempts = input.protocolRepairAttempts ?? 0;
+  if (!Number.isInteger(protocolRepairAttempts) || protocolRepairAttempts < 0) throw new Error('invalid-protocol-repair-attempts');
+  const body = String(input.body || '').trim();
+  if (!body) throw new Error('completion route message body is required');
+  const message = {
+    id,
+    fromWorkerId: input.fromWorkerId || null,
+    from: input.from || (input.fromWorkerId ? null : 'operator'),
+    toWorkerId: input.toWorkerId,
+    body,
+    taskId: input.taskId || null,
+    phase: operator ? 'delivered' : 'queued',
+    createdAt: at,
+    deliveredAt: operator ? at : 0,
+    completedAt: 0,
+    response: '',
+    autoRecoveryAttempts: 0,
+    lastAutoRecoveryReason: '',
+    requiresFleetMessage: input.requiresFleetMessage === true,
+    protocolRepairOf: input.protocolRepairOf || null,
+    protocolRepairAttempts,
+    goalContinuation: input.goalContinuation === true,
+  };
+  if (input.stage) {
+    input.stage.messages.push(message);
+    return message;
+  }
+  if (operator && !Number.isFinite(at)) throw new Error('invalid-delivered-at');
+  const ownedMessage = (id) => Object.values(state.assignments || {}).some((assignment) => (assignment.messageIds || []).includes(id));
+  const inactiveMessage = (candidate) => !ownedMessage(candidate.id) && ['done', 'blocked', 'cancelled', 'delivered'].includes(candidate.phase);
+  if (state.messages.length >= MAX_MESSAGES && !state.messages.some(inactiveMessage)) throw new Error('completion-message-capacity-active');
+  state.messages.push(message);
+  while (state.messages.length > MAX_MESSAGES) {
+    const victim = state.messages.findIndex(inactiveMessage);
+    if (victim < 0) throw new Error('completion-message-capacity-active');
+    state.messages.splice(victim, 1);
+  }
+  c5JournalInPlace(state, 'message.queued', `${id}: ${input.fromWorkerId || input.from || 'operator'} → ${input.toWorkerId}`, { taskId: message.taskId }, at);
+  return message;
+}
+function c5CreateTask(state, input, at, workerId) {
+  if (!Number.isFinite(at) || at <= 0) throw new Error('task createdAt must be positive');
+  let id;
+  do { id = `T-${state.nextTask++}`; } while (state.tasks[id]);
+  const role = canonicalRole(input.role);
+  if (!['implementation', 'review'].includes(role)) throw new Error('coordinator may not create coordinator child tasks');
+  if (!String(input.prompt || '').trim()) throw new Error('completion child task prompt is required');
+  const dependencies = Array.from(new Set((input.dependencies || []).filter((id) => state.tasks[id])));
+  const task = {
+    id,
+    title: String(input.title || '').trim() || id,
+    prompt: String(input.prompt || '').trim(),
+    role,
+    priority: Math.max(-100, Math.min(100, Number(input.priority || 0) || 0)),
+    dependencies,
+    parentTaskId: input.parentTaskId && state.tasks[input.parentTaskId] ? input.parentTaskId : null,
+    createdByWorkerId: workerId,
+    createdByRole: 'coordinator',
+    phase: 'pending',
+    assignedWorkerId: null,
+    attempts: 0,
+    createdAt: at,
+    startedAt: 0,
+    completedAt: 0,
+    result: '',
+    statusNote: '',
+    autoRecoveryAttempts: 0,
+    lastAutoRecoveryReason: '',
+  };
+  state.tasks[id] = task;
+  c5JournalInPlace(state, 'task.created', `${id}: ${task.title}`, { role: task.role, parentTaskId: task.parentTaskId, createdByWorkerId: workerId, createdByRole: task.createdByRole }, at);
+  return task;
+}
+function c5QueueControlNotice(state, workerId, input, at) {
+  const worker = state.workers[workerId];
+  if (!worker || !String(input.body || '').trim()) return null;
+  if (!Array.isArray(worker.controlInbox)) worker.controlInbox = [];
+  const ordinal = input.stage ? input.stage.controlNotices.length + 1 : worker.controlInbox.length + 1;
+  const notice = { id: `C-${state.generation + 1}-${at}-${ordinal}`, type: String(input.type || 'control'), body: String(input.body).trim(), taskId: input.taskId || null, relatedAssignmentId: input.relatedAssignmentId || null, createdAt: at };
+  if (input.stage) {
+    input.stage.controlNotices.push({ workerId, notice });
+    return notice;
+  }
+  const ownedNotice = (id) => Object.values(state.assignments || {}).some((assignment) => assignment.workerId === workerId && (assignment.controlNoticeIds || []).includes(id));
+  if (worker.controlInbox.length >= MAX_CONTROL_NOTICES) throw new Error('completion-control-capacity-active');
+  worker.controlInbox.push(notice);
+  if (worker.controlInbox.length > MAX_CONTROL_NOTICES) throw new Error('completion-control-capacity-active');
+  c5JournalInPlace(state, 'control.queued', `${notice.id} queued for ${workerId}`, { workerId, taskId: notice.taskId, type: notice.type }, at);
+  return notice;
+}
+function c5CompletionCapacityError(reason) {
+  const error = new Error(reason);
+  error.reason = reason;
+  return error;
+}
+function c5AssertCompletionCapacity(state, assignment, stage) {
+  const sourceMessageIds = new Set(assignment.messageIds || []);
+  const otherAssignments = Object.values(state.assignments || {}).filter((candidate) => candidate.id !== assignment.id);
+  const ownedByOther = (id) => otherAssignments.some((candidate) => (candidate.messageIds || []).includes(id));
+  const inactiveOrReleased = (message) => !ownedByOther(message.id)
+    && (['done', 'blocked', 'cancelled', 'delivered'].includes(message.phase) || sourceMessageIds.has(message.id));
+  const safeMessageVictims = state.messages.filter(inactiveOrReleased).length;
+  if (state.messages.length + stage.messages.length - safeMessageVictims > MAX_MESSAGES) {
+    throw c5CompletionCapacityError('completion-message-capacity-active');
+  }
+  if (assignment.kind === 'control') {
+    const worker = state.workers[assignment.workerId];
+    const releasedNoticeIds = new Set(assignment.controlNoticeIds || []);
+    const remaining = (worker?.controlInbox || []).filter((notice) => !releasedNoticeIds.has(notice.id)).length;
+    const stagedForWorker = stage.controlNotices.filter((entry) => entry.workerId === assignment.workerId).length;
+    if (remaining + stagedForWorker > MAX_CONTROL_NOTICES) throw c5CompletionCapacityError('completion-control-capacity-active');
+  } else if (stage.controlNotices.some((entry) => {
+    const target = state.workers[entry.workerId];
+    return (target?.controlInbox || []).length >= MAX_CONTROL_NOTICES;
+  })) {
+    throw c5CompletionCapacityError('completion-control-capacity-active');
+  }
+}
+function c5MaterializeCompletionStage(state, assignment, stage, at) {
+  const sourceMessageIds = new Set(assignment.messageIds || []);
+  const otherAssignments = Object.values(state.assignments || {}).filter((candidate) => candidate.id !== assignment.id);
+  const ownedByOther = (id) => otherAssignments.some((candidate) => (candidate.messageIds || []).includes(id));
+  const safeVictim = (message) => !ownedByOther(message.id)
+    && ['done', 'blocked', 'cancelled', 'delivered'].includes(message.phase);
+  for (const message of stage.messages) state.messages.push(message);
+  while (state.messages.length > MAX_MESSAGES) {
+    const victim = state.messages.findIndex((message) => safeVictim(message) || sourceMessageIds.has(message.id));
+    if (victim < 0) throw c5CompletionCapacityError('completion-message-capacity-active');
+    state.messages.splice(victim, 1);
+  }
+  for (const entry of stage.controlNotices) {
+    const worker = state.workers[entry.workerId];
+    if (!worker) throw c5CompletionCapacityError('completion-control-capacity-active');
+    worker.controlInbox = Array.isArray(worker.controlInbox) ? worker.controlInbox : [];
+    worker.controlInbox.push(entry.notice);
+    if (worker.controlInbox.length > MAX_CONTROL_NOTICES) throw c5CompletionCapacityError('completion-control-capacity-active');
+  }
+  for (const message of stage.messages) c5JournalInPlace(state, 'message.queued', `${message.id}: ${message.fromWorkerId || message.from || 'operator'} → ${message.toWorkerId}`, { taskId: message.taskId }, at);
+  for (const entry of stage.controlNotices) c5JournalInPlace(state, 'control.queued', `${entry.notice.id} queued for ${entry.workerId}`, { workerId: entry.workerId, taskId: entry.notice.taskId, type: entry.notice.type }, at);
+}
+function c5RouteMessages(state, workerId, parsed, taskId, at, stage) {
+  const result = { queued: [], failures: [] };
+  const worker = state.workers[workerId];
+  const sourceRole = roleContract(state.tasks[taskId]?.role || worker?.role);
+  const allowed = new Set(sourceRole?.allowedHandoffs || []);
+  for (const item of parsed.messages || []) {
+    const target = item.to;
+    if (target === workerId) { result.failures.push({ target, body: item.body, reason: 'recipient resolves to the sending worker itself' }); continue; }
+    if (target === 'operator' || target === 'scheduler') {
+      const queued = c5QueueMessage(state, { fromWorkerId: workerId, toWorkerId: 'operator', body: item.body, taskId, stage }, at);
+      result.queued.push(queued.id); continue;
+    }
+    if (target === 'broadcast') {
+      let broadcastCount = 0;
+      for (const peer of Object.values(state.workers)) {
+        if (peer.enabled !== false && peer.id !== workerId && peer.lifecycle !== 'stale' && Number.isInteger(peer.tabId) && allowed.has(canonicalRole(peer.role))) {
+          const queued = c5QueueMessage(state, { fromWorkerId: workerId, toWorkerId: peer.id, body: item.body, taskId, stage }, at);
+          result.queued.push(queued.id); broadcastCount += 1;
+        }
+      }
+      if (!broadcastCount) result.failures.push({ target, body: item.body, reason: 'no enabled peer recipients are available for broadcast' });
+      continue;
+    }
+    const targetWorker = state.workers[target];
+    if (!targetWorker || targetWorker.enabled === false || targetWorker.lifecycle === 'stale' || !Number.isInteger(targetWorker.tabId)) {
+      result.failures.push({ target, body: item.body, reason: 'recipient is not a currently enabled registered worker' }); continue;
+    }
+    const targetRole = canonicalRole(targetWorker.role);
+    if (!allowed.has(targetRole)) { result.failures.push({ target, body: item.body, reason: `source role ${sourceRole?.id || 'unknown'} is not allowed to hand off to ${targetRole}` }); continue; }
+    const queued = c5QueueMessage(state, { fromWorkerId: workerId, toWorkerId: target, body: item.body, taskId, stage }, at);
+    result.queued.push(queued.id);
+  }
+  return result;
+}
+function c5CreateChildren(state, workerId, parsed, parentTaskId, at) {
+  const result = { created: [], failures: [] };
+  if (!parsed.tasks?.length && !parsed.malformedTaskEnvelope) return result;
+  const parent = parentTaskId ? state.tasks[parentTaskId] : null;
+  if (canonicalRole(parent?.role || state.workers[workerId]?.role) !== 'coordinator') {
+    for (const item of parsed.tasks || []) result.failures.push({ key: item.key || '', title: item.title || '', reason: 'only Coordinator may create child tasks' });
+    if (parsed.malformedTaskEnvelope) result.failures.push({ key: '', title: '', reason: 'malformed FLEET_TASK envelope' });
+    return result;
+  }
+  const aliases = new Map();
+  for (const item of parsed.tasks || []) {
+    try {
+      const dependencies = [];
+      for (const raw of item.dependencies || []) {
+        const token = String(raw || '').trim(); const alias = token.startsWith('$') ? token.slice(1) : token;
+        if (state.tasks[token]) dependencies.push(token); else if (aliases.has(alias)) dependencies.push(aliases.get(alias)); else throw new Error(`unknown dependency ${token}`);
+      }
+      if (item.key && aliases.has(item.key)) throw new Error(`duplicate child-task key ${item.key}`);
+      const child = c5CreateTask(state, { ...item, dependencies, parentTaskId }, at, workerId);
+      if (item.key) aliases.set(item.key, child.id); result.created.push(child.id);
+    } catch (error) { result.failures.push({ key: item.key || '', title: item.title || '', reason: String(error?.message || error) }); }
+  }
+  if (parsed.malformedTaskEnvelope) result.failures.push({ key: '', title: '', reason: 'malformed FLEET_TASK envelope' });
+  return result;
+}
+function c5ProtocolRepair(state, workerId, assignmentId, taskId, sourceMessage, reason, failures, at, stage) {
+  if (Number(sourceMessage?.protocolRepairAttempts || 0) >= MAX_PROTOCOL_REPAIR_ATTEMPTS) return null;
+  const failedOnly = failures.length ? failures.map((failure) => `- intended target: ${failure.target}\n  message: ${String(failure.body || '').trim()}`).join('\n') : '- Recover the intended peer recipient and message from your immediately previous response.';
+  const body = [
+    'FLEET ROUTING FORMAT RETRY.',
+    `Your previous completion (${assignmentId}) finished the underlying work, but required peer delivery was not durably routed.`,
+    `Reason: ${reason}`,
+    '',
+    'Do NOT redo the underlying task or analysis.',
+    'Re-emit ONLY the peer delivery that failed routing. Do not resend any peer message that was already accepted.',
+    'Use one complete envelope per delivery with an exact currently registered W-... recipient:',
+    '[FLEET_MESSAGE to="W-123"]',
+    'message body',
+    '[/FLEET_MESSAGE]',
+    '',
+    'Failed delivery context:',
+    failedOnly,
+    '',
+    'End with exactly one FLEET_STATUS envelope after the repaired peer message(s).',
+    'If the correct recipient cannot be determined from the registered peer list and your immediately previous response, use state="blocked" and explain why.',
+  ].join('\n');
+  return c5QueueMessage(state, { from: 'scheduler', toWorkerId: workerId, body, taskId, requiresFleetMessage: true, protocolRepairOf: assignmentId, protocolRepairAttempts: Number(sourceMessage?.protocolRepairAttempts || 0) + 1, stage }, at);
+}
+async function c5BeginWarmIdleV2(workerId, reason = 'assignment complete') {
+  const claimed = await mutateFleet((state) => {
+    const worker = state.workers[workerId];
+    if (!state.policy.activeWorkerWindows || !worker || worker.enabled === false || worker.currentAssignmentId || worker.fault) return { applied: false };
+    if (worker.lifecycle === 'warm-idle' && Number(worker.warmIdleUntil || 0) > 0) return { applied: true, idempotent: true, warmIdleUntil: worker.warmIdleUntil };
+    const at = now();
+    const warmIdleUntil = at + boundedWarmIdleMs(state.policy.warmIdleMs);
+    worker.lifecycle = 'warm-idle';
+    worker.runtime.busy = false;
+    worker.warmIdleSince = at;
+    worker.warmIdleUntil = warmIdleUntil;
+    c5JournalInPlace(state, 'worker.warm_idle', `${workerId} kept live for ${Math.round((warmIdleUntil - at) / 1000)}s`, { reason, warmIdleUntil }, at);
+    return { applied: true, warmIdleUntil };
+  });
+  if (!claimed.result?.applied) return false;
+  if (claimed.result.idempotent) return true;
+  await chrome.alarms.create(warmIdleAlarmName(workerId), { when: claimed.result.warmIdleUntil });
+  schedule().catch(() => {});
+  return true;
+}
+const c5RotationClaims = new Map();
+function c5RotationClaimValid(state, claim) {
+  const worker = state.workers[claim.workerId];
+  return Boolean(worker
+    && c5RotationClaims.get(claim.workerId) === claim
+    && worker.enabled !== false
+    && worker.currentAssignmentId == null
+    && worker.chatRotationPending === true
+    && worker.lifecycle === 'rotating'
+    && worker.tabId === claim.tabId
+    && !worker.fault);
+}
+function c5ApplyRotationFailureFaultV2(state, claim, error, at) {
+  if (!c5RotationClaimValid(state, claim)) return { applied: false, stale: true };
+  if (!Number.isFinite(at) || at <= 0) throw new Error('invalid-rotation-failure-at');
+  const worker = state.workers[claim.workerId];
+  const message = String(error?.message || error || 'chat rotation failed').slice(0, 2000) || 'chat rotation failed';
+  worker.fault = { code: 'chat-rotation-failed', message, at, assignmentId: null };
+  worker.lifecycle = 'rotation-failed';
+  worker.runtime.busy = false;
+  worker.pageBusyUntil = 0;
+  worker.lastChatRotationError = String(error);
+  c5JournalInPlace(state, 'worker.chat_rotation_failed', `${claim.workerId} could not start a fresh ChatGPT conversation`, { reason: claim.reason, tabId: claim.tabId, error: String(error) }, at);
+  return { applied: true };
+}
+async function c5RotateWorkerChatV2(workerId, reason = 'chat turn limit reached') {
+  const claim = { workerId, tabId: null, reason, token: Symbol('rotation-claim') };
+  const claimed = await mutateFleet((state) => {
+    const worker = state.workers[workerId];
+    if (!worker || worker.enabled === false || worker.currentAssignmentId || worker.chatRotationPending !== true || worker.fault || !Number.isInteger(worker.tabId) || worker.lifecycle === 'rotating') return { applied: false };
+    const at = now();
+    claim.tabId = worker.tabId;
+    claim.claimAt = at;
+    worker.lifecycle = 'rotating';
+    worker.runtime.busy = false;
+    worker.pageBusyUntil = at + WORKER_WAKE_TIMEOUT_MS;
+    c5JournalInPlace(state, 'worker.chat_rotation_started', `${workerId} starting a fresh ChatGPT conversation`, { reason, tabId: worker.tabId, turns: worker.chatTurnCount, limit: maxTurnsPerChatForRole(state.topology, worker.role) }, at);
+    return { applied: true, tabId: worker.tabId };
+  });
+  if (!claimed.result?.applied) return false;
+  c5RotationClaims.set(workerId, claim);
+  const tabId = claimed.result.tabId;
+  try {
+    await clearWarmIdleAlarm(workerId);
+    await chrome.tabs.update(tabId, { url: 'https://chatgpt.com/' });
+    await waitForTabReady(tabId, 30000);
+    await ensureFleetBridgeAfterWake(tabId, 30000);
+    const tab = await chrome.tabs.get(tabId);
+    const finished = await mutateFleet((state) => {
+      const worker = state.workers[workerId];
+      if (!c5RotationClaimValid(state, claim)) return { applied: false, stale: true };
+      const at = now();
+      worker.chatTurnCount = 0;
+      worker.chatRotationPending = false;
+      worker.lastCountedAssignmentId = '';
+      worker.lastChatRotationAt = at;
+      worker.lastChatRotationError = '';
+      worker.lifecycle = 'idle';
+      worker.runtime.busy = false;
+      worker.pageBusyUntil = 0;
+      worker.title = tab.title || worker.title;
+      worker.url = tab.url || worker.url;
+      worker.windowId = Number.isInteger(tab.windowId) ? tab.windowId : worker.windowId;
+      c5JournalInPlace(state, 'worker.chat_rotated', `${workerId} started a fresh ChatGPT conversation`, { reason, tabId }, at);
+      return { applied: true };
+    });
+    c5RotationClaims.delete(workerId);
+    if (!finished.result?.applied) return false;
+    schedule().catch(() => {});
+    return true;
+  } catch (error) {
+    await mutateFleet((state) => c5ApplyRotationFailureFaultV2(state, claim, error, now())).catch(() => {});
+    c5RotationClaims.delete(workerId);
+    return false;
+  }
+}
+async function c5WorkerIdleReadyV2(tabId, message = {}) {
+  const state = await loadFleetState();
+  const workerId = workerIdForTabInState(state, tabId);
+  const worker = workerId ? state.workers[workerId] : null;
+  if (!worker || worker.currentAssignmentId || worker.enabled === false || worker.fault || !Number.isInteger(worker.tabId)) return {};
+  if (typeof message.assignmentId !== 'string' || !message.assignmentId || worker.lastCompletionAssignmentId !== message.assignmentId || !(Number(worker.lastAssignmentReleasedAt) > 0)) return {};
+  if (worker.lifecycle === 'warm-idle' || worker.lifecycle === 'rotating') return {};
+  if (worker.chatRotationPending) {
+    await c5RotateWorkerChatV2(workerId, 'turn cap reached at idle acknowledgement').catch(() => {});
+  } else {
+    await c5BeginWarmIdleV2(workerId, `assignment ${message.assignmentId} acknowledged`).catch(() => {});
+  }
+  return {};
+}
+completeAssignment = async function completeAssignmentC5(senderTabId, payload) {
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) return completeAssignmentC4Legacy(senderTabId, payload);
+  const workerId = workerIdForTabInState(loaded, senderTabId);
+  if (!workerId) return { ok: false, code: 'worker-not-found', terminal: true, expectedAssignmentId: null, reportedAssignmentId: payload?.assignmentId || null };
+  if (typeof payload?.assignmentId !== 'string' || !payload.assignmentId) return { ok: false, code: 'assignment-id-required', terminal: false, expectedAssignmentId: loaded.workers[workerId]?.currentAssignmentId || null, reportedAssignmentId: payload?.assignmentId || null };
+  if (!Number.isFinite(payload.responseTerminalAt) || payload.responseTerminalAt <= 0) return { ok: false, code: 'invalid-response-terminal-at', terminal: false, expectedAssignmentId: loaded.workers[workerId]?.currentAssignmentId || null, reportedAssignmentId: payload.assignmentId };
+  let phaseA;
+  try {
+    phaseA = await mutateFleet((state) => {
+      const begun = globalThis.ModelFleetStateM7C5.beginCompletion(state, { workerId, assignmentId: payload.assignmentId, responseTerminalAt: payload.responseTerminalAt });
+      if (begun.result.ok) replaceC3State(state, begun.state);
+      return begun.result;
+    });
+  } catch (error) {
+    return { ok: false, code: error.reason || 'completion-begin-rejected', terminal: false, expectedAssignmentId: loaded.workers[workerId]?.currentAssignmentId || null, reportedAssignmentId: payload.assignmentId, error: String(error.message || error) };
+  }
+  if (!phaseA.result?.ok) return { ok: false, ...phaseA.result, error: phaseA.result.error || phaseA.result.code };
+  const buffered = liveHeartbeats.get(workerId);
+  if (buffered && buffered.at <= payload.responseTerminalAt) liveHeartbeats.delete(workerId);
+  const responseText = String(payload.text || '').slice(0, MAX_RESULT_CHARS);
+  const parsed = parseFleetOutput(responseText);
+  const phaseBAt = now();
+  let phaseB;
+  try {
+    phaseB = await mutateFleet((state) => {
+      const worker = state.workers[workerId]; const assignment = state.assignments[payload.assignmentId];
+      if (!worker || worker.currentAssignmentId !== payload.assignmentId || !assignment || assignment.phase !== 'completing') return { rejected: true, code: 'completion-ownership-lost', terminal: false, expectedAssignmentId: worker?.currentAssignmentId || null, reportedAssignmentId: payload.assignmentId };
+      const acknowledgedAt = phaseBAt;
+      const stage = { messages: [], controlNotices: [] };
+      const sourceMessages = assignment.kind === 'message' ? assignment.messageIds.map((id) => state.messages.find((message) => message.id === id)).filter(Boolean).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0)) : [];
+      const sourceMessage = sourceMessages.find((message) => message.requiresFleetMessage === true) || sourceMessages[0] || null;
+      const relatedTaskId = assignment.kind === 'task' ? assignment.taskId : sourceMessage?.taskId || assignment.controlNoticeIds.map((id) => (worker.controlInbox || []).find((notice) => notice.id === id)?.taskId).find(Boolean) || null;
+      const routeResult = c5RouteMessages(state, workerId, parsed, relatedTaskId, acknowledgedAt, stage);
+      const childResult = c5CreateChildren(state, workerId, parsed, relatedTaskId, acknowledgedAt);
+      if (childResult.failures.length) {
+        c5QueueControlNotice(state, workerId, {
+          type: 'child-task-creation-failure',
+          body: [
+            'COORDINATOR CHILD-TASK CREATION FAILURE.',
+            'One or more FLEET_TASK envelopes were rejected by the control plane.',
+            ...childResult.failures.map((failure) => `- ${failure.key || failure.title || 'task'}: ${failure.reason}`),
+            'Observe the failure, replan, and emit corrected child tasks if still required.',
+          ].join('\n'),
+          taskId: relatedTaskId,
+          relatedAssignmentId: payload.assignmentId,
+          stage,
+        }, acknowledgedAt);
+      }
+      const repairReason = sourceMessage?.requiresFleetMessage && routeResult.queued.length === 0 ? 'This routing-format retry still produced no valid routed FLEET_MESSAGE.' : (parsed.malformedMessageEnvelope ? 'Your response contained a FLEET_MESSAGE marker, but no complete valid envelope.' : routeResult.failures.map((failure) => `Failed target ${failure.target}: ${failure.reason}`).join('\n'));
+      const repairMessage = repairReason ? c5ProtocolRepair(state, workerId, payload.assignmentId, relatedTaskId, sourceMessage, repairReason, routeResult.failures, acknowledgedAt, stage) : null;
+      const repairExhausted = Boolean(repairReason && !repairMessage && sourceMessage?.requiresFleetMessage === true);
+      if (repairExhausted) c5QueueMessage(state, {
+        from: 'scheduler',
+        toWorkerId: 'operator',
+        body: `Fleet peer-routing repair failed for ${workerId} (${payload.assignmentId}).\n\n${repairReason}`,
+        taskId: relatedTaskId,
+        stage,
+      }, acknowledgedAt);
+      c5AssertCompletionCapacity(state, assignment, stage);
+      if (assignment.kind === 'task') {
+        const task = state.tasks[assignment.taskId];
+        task.result = responseText; task.completedAt = acknowledgedAt; task.completedByWorkerId = workerId; task.completedByRole = canonicalRole(worker.role); task.statusNote = repairMessage ? `peer routing repair queued as ${repairMessage.id}` : parsed.statusNote;
+      }
+      for (const message of sourceMessages) { message.response = responseText; message.completedAt = acknowledgedAt; if (repairMessage && message.id === sourceMessage?.id) message.protocolRepairMessageId = repairMessage.id; }
+      const disposition = assignment.kind === 'task' ? (parsed.state === 'blocked' ? 'blocked' : 'done') : assignment.kind === 'control' ? (parsed.state === 'blocked' ? 'blocked' : 'done') : Object.fromEntries(sourceMessages.map((message) => [message.id, repairExhausted && message.id === sourceMessage?.id ? 'blocked' : 'done']));
+      let next = c5Journal(state, 'assignment.parsed', `${payload.assignmentId}: completion parsed`, { workerId, taskId: relatedTaskId, messageIds: assignment.messageIds || [], routeFailures: routeResult.failures.length, childTaskCount: childResult.created.length }, acknowledgedAt);
+      if (repairMessage) next = c5Journal(next, 'assignment.protocol_repair_queued', `${payload.assignmentId}: queued ${repairMessage.id}`, { workerId, taskId: relatedTaskId, repairMessageId: repairMessage.id }, acknowledgedAt);
+      if (repairExhausted) next = c5Journal(next, 'assignment.protocol_repair_exhausted', `${payload.assignmentId}: protocol repair exhausted`, { workerId, taskId: relatedTaskId }, acknowledgedAt);
+      if (assignment.kind === 'task') next = c5Journal(next, `task.${disposition}`, `${assignment.taskId} ${disposition} by ${workerId}`, { taskId: assignment.taskId, workerId }, acknowledgedAt);
+      if (sourceMessages.length) next = c5Journal(next, repairExhausted ? 'message.protocol_repair_failed' : (sourceMessages.length > 1 ? 'message.batch_completed' : 'message.completed'), repairExhausted
+        ? `${sourceMessage?.id || sourceMessages[0].id} exhausted peer-routing repair at ${workerId}`
+        : sourceMessages.length > 1 ? `${sourceMessages.length} messages (${sourceMessages[0].id}…${sourceMessages[sourceMessages.length - 1].id}) handled by ${workerId}` : `${sourceMessages[0].id} handled by ${workerId}`, { messageIds: sourceMessages.map((message) => message.id), count: sourceMessages.length }, acknowledgedAt);
+      const lagMs = Math.max(0, acknowledgedAt - assignment.responseTerminalAt); const releaseWorker = next.workers[workerId];
+      releaseWorker.lastCompletionAssignmentId = payload.assignmentId; releaseWorker.lastAssignmentReleasedAt = acknowledgedAt; releaseWorker.lastResponseTerminalAt = assignment.responseTerminalAt; releaseWorker.lastCompletionReleaseLagMs = lagMs; releaseWorker.completionReleaseLagCount = Math.max(0, Number(releaseWorker.completionReleaseLagCount || 0)) + 1; releaseWorker.completionReleaseLagTotalMs = Math.max(0, Number(releaseWorker.completionReleaseLagTotalMs || 0)) + lagMs; releaseWorker.completionReleaseLagMaxMs = Math.max(Math.max(0, Number(releaseWorker.completionReleaseLagMaxMs || 0)), lagMs); releaseWorker.runtime.busy = false; releaseWorker.lastResultAt = acknowledgedAt; releaseWorker.progressVersion = Number(releaseWorker.progressVersion || 0) + 1; releaseWorker.lifecycle = 'idle';
+      next = c5Journal(next, 'assignment.release_lag', `${payload.assignmentId}: response terminal → assignment released ${lagMs}ms`, { workerId, responseTerminalAt: assignment.responseTerminalAt, assignmentReleasedAt: acknowledgedAt, lagMs }, acknowledgedAt);
+      const acknowledged = globalThis.ModelFleetStateM7C5.acknowledgeCompletion(next, { workerId, assignmentId: payload.assignmentId, disposition, acknowledgedAt });
+      c5MaterializeCompletionStage(acknowledged.state, assignment, stage, acknowledgedAt);
+      replaceC3State(state, acknowledged.state);
+      return { ...acknowledged.result, repairMessageId: repairMessage?.id || null, childTaskCount: childResult.created.length };
+    });
+  } catch (error) {
+    return { ok: false, code: error.reason || 'completion-routing-failed', terminal: false, assignmentId: payload.assignmentId, pendingCompletion: true, error: String(error.message || error) };
+  }
+  if (phaseB.result?.rejected || phaseB.result?.ok !== true) return { ok: false, ...phaseB.result, pendingCompletion: true };
+  const completed = phaseB.state;
+  if (completed.workers[workerId]?.['chatRotation' + 'Pending']) c5RotateWorkerChatV2(workerId, `turn cap reached after ${payload.assignmentId}`).catch(() => {});
+  else c5BeginWarmIdleV2(workerId, `assignment ${payload.assignmentId} completed`).catch(() => {});
+  schedule().catch(() => {});
+  return { ok: true, assignmentId: payload.assignmentId, completed: true };
+};
+
+// C10 v2 registration overlay. The legacy registration implementation remains
+// the isolated v1 branch until the final persistence cutover.
+importScripts('fleet-state-model-m7-c10.js');
+const registerTabC10Legacy = registerTab;
+const C10_REGISTRATION_TIMEOUT_MS = C7_STOP_TRANSPORT_TIMEOUT_MS;
+function c10Module() { return globalThis.ModelFleetStateM7C10; }
+function c10Warning(stage, error, detail = {}) { return { ...detail, stage, error: String(error) }; }
+async function c10Bounded(label, operation) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(operation),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label}-timeout`)), C10_REGISTRATION_TIMEOUT_MS); }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+async function c10EnsureWorkerWindow(workerId, expectedTabId, warnings) {
+  let workerTab = await chrome.tabs.get(expectedTabId);
+  let win = await chrome.windows.get(workerTab.windowId, { populate: true });
+  const foreignTabs = (win.tabs || []).filter((tab) => tab.id !== expectedTabId);
+  if (foreignTabs.length) {
+    const created = await chrome.windows.create({ tabId: expectedTabId, focused: false, type: 'normal' });
+    workerTab = await chrome.tabs.get(expectedTabId);
+    win = await chrome.windows.get(created.id, { populate: true });
+  }
+  const stableWindowId = workerTab.windowId;
+  await mutateFleet((state) => {
+    const worker = state.workers[workerId];
+    if (!worker || worker.tabId !== expectedTabId) return { stale: true };
+    const next = globalThis.ModelFleetStateM7C3.appendJournal(state, 'worker.window_bound', `${workerId} bound to dedicated live window ${stableWindowId}`, { workerId, tabId: expectedTabId, windowId: stableWindowId }, now());
+    replaceC3State(state, next);
+    state.workers[workerId].windowId = stableWindowId;
+    return { stale: false };
+  });
+  return stableWindowId;
+}
+async function c10PostRegistrationV2(committed, tabId) {
+  const result = { ...committed.result, cleanupWarnings: [] };
+  const workerId = result.worker.id;
+  schedule().catch(() => {});
+  try { await c10Bounded('badge-update', () => updateBadge(tabId)); }
+  catch (error) { result.cleanupWarnings.push(c10Warning(String(error).includes('timeout') ? 'badge-update-timeout' : 'badge-update-failed', error, { workerId, tabId })); }
+  if (committed.state?.policy?.activeWorkerWindows === true) {
+    try { await c10Bounded('worker-window', () => c10EnsureWorkerWindow(workerId, tabId, result.cleanupWarnings)); }
+    catch (error) { result.cleanupWarnings.push(c10Warning(String(error).includes('timeout') ? 'worker-window-timeout' : 'worker-window-failed', error, { workerId, tabId })); }
+  }
+  try { await c10Bounded('bridge', () => ensureFleetBridge(tabId)); }
+  catch (error) { result.cleanupWarnings.push(c10Warning(String(error).includes('timeout') ? 'bridge-timeout' : 'bridge-failed', error, { workerId, tabId })); }
+  let current;
+  try { current = await c10Bounded('pre-send-state-read', () => loadFleetState()); }
+  catch (error) { result.cleanupWarnings.push(c10Warning('pre-send-state-read', error, { workerId, tabId })); current = null; }
+  const proof = current && current.version === 2 && current.workers?.[workerId]?.tabId === tabId
+    && Object.values(current.workers).filter((candidate) => candidate.tabId === tabId).length === 1;
+  if (proof) {
+    try {
+      await c10Bounded('registration-send', () => chrome.tabs.sendMessage(tabId, {
+        type: 'fleet:registration-changed', registered: true,
+        expectedWorkerId: workerId, worker: current.workers[workerId],
+      }));
+    } catch (error) { result.cleanupWarnings.push(c10Warning(String(error).includes('timeout') ? 'send-timeout' : 'send-failed', error, { workerId, tabId })); }
+  }
+  return result;
+}
+async function registerTabC10(tabId, patch = {}) {
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) return registerTabC10Legacy(tabId, patch);
+  if (globalThis.m7TabCloseClaims?.has(tabId)) throw new Error('topology-tab-close-claimed');
+  const tab = await supportedTab(tabId);
+  if (!tab) throw new Error('tab is not a supported ChatGPT tab');
+  const registrationAt = now();
+  const committed = await mutateFleet((state) => {
+    if (globalThis.m7TabCloseClaims?.has(tabId)) throw new Error('topology-tab-close-claimed');
+    const outcome = c10Module().upsertWorkerBindingV2(state, { tab, patch, at: registrationAt });
+    replaceC3State(state, outcome.state);
+    return outcome.result;
+  });
+  return c10PostRegistrationV2(committed, tabId);
+}
+registerTab = registerTabC10;
+
+// C11 v2 role/topology mutation overlay. The legacy implementations remain
+// available for the version-1 branch; topology reconciliation stays C12+.
+importScripts('fleet-state-model-m7-c11.js');
+const setTopologyRoleCountC11Legacy = setTopologyRoleCount;
+const setRoleTurnLimitC11Legacy = setRoleTurnLimit;
+const c11LegacySnapshot = publicSnapshot;
+function c11Module() { return globalThis.ModelFleetStateM7C11; }
+
+async function setWorkerRoleC11Dispatch(message) {
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) {
+    const committed = await mutateFleet((state) => {
+      const worker = state.workers[message.workerId];
+      if (!worker) throw new Error('worker not found');
+      if (worker.currentAssignmentId) throw new Error('cannot change role while worker owns an active assignment');
+      worker.role = canonicalRole(message.role);
+      if (worker.chatTurnCount >= maxTurnsPerChatForRole(state.topology, worker.role)) worker.chatRotationPending = true;
+      appendJournal(state, 'worker.role', `${worker.id} role → ${worker.role}`);
+    });
+    return { snapshot: c11LegacySnapshot(committed.state) };
+  }
+  const at = now();
+  const committed = await mutateFleet((state) => {
+    const outcome = c11Module().setWorkerRoleV2(state, { workerId: message.workerId, role: message.role, at });
+    replaceC3State(state, outcome.state);
+    return outcome.result;
+  });
+  return committed.result;
+}
+
+async function setTopologyRoleCountC11Dispatch(message) {
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) return { snapshot: await setTopologyRoleCountC11Legacy(message.role, message.count) };
+  const at = now();
+  const committed = await mutateFleet((state) => {
+    const outcome = c11Module().setTopologyRoleCountV2(state, { role: message.role, count: message.count, at });
+    replaceC3State(state, outcome.state);
+    return outcome.result;
+  });
+  return committed.result;
+}
+
+async function setRoleTurnLimitC11Dispatch(message) {
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) {
+    const snapshot = await setRoleTurnLimitC11Legacy(message.role, message.limit);
+    return { snapshot };
+  }
+  const at = now();
+  const committed = await mutateFleet((state) => {
+    const outcome = c11Module().setRoleTurnLimitV2(state, { role: message.role, limit: message.limit, at });
+    replaceC3State(state, outcome.state);
+    return outcome.result;
+  });
+  schedule().catch(() => {});
+  return committed.result;
+}
+
+// C12 v2 topology reconciliation overlay. The legacy implementation remains
+// the isolated version-1 branch; v2 uses canonical planning, C9 unregister,
+// and C10 registration with fresh proof at every durable action boundary.
+importScripts('fleet-state-model-m7-c12.js');
+const reconcileFleetTopologyC12Legacy = reconcileFleetTopology;
+const C12_TOPOLOGY_TIMEOUT_MS = C7_STOP_TRANSPORT_TIMEOUT_MS;
+const C12_HEARTBEAT_MAX_AGE_MS = 30000;
+globalThis.m7TabCloseClaims = globalThis.m7TabCloseClaims || new Map();
+function c12Module() { return globalThis.ModelFleetStateM7C12; }
+function c12Warning(stage, error, detail = {}) { return { ...detail, stage, error: String(error) }; }
+async function c12Bounded(label, operation) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(operation),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label}-timeout`)), C12_TOPOLOGY_TIMEOUT_MS); }),
+    ]);
+  } finally { if (timer) clearTimeout(timer); }
+}
+function c12ReleaseClaim(tabId, claim) {
+  if (globalThis.m7TabCloseClaims?.get(tabId) === claim) globalThis.m7TabCloseClaims.delete(tabId);
+}
+async function c12ClaimedTabRemove(tabId, claim, warnings, detail, label) {
+  const removePromise = Promise.resolve().then(() => chrome.tabs.remove(tabId));
+  let settled = false;
+  const settle = (error) => {
+    if (settled) return;
+    settled = true;
+    c12ReleaseClaim(tabId, claim);
+    if (error) {
+      // The rejection is observed here even when the bounded caller already returned.
+      void error;
+    }
+  };
+  removePromise.then(() => settle(), (error) => settle(error));
+  try {
+    await c12Bounded(label, () => removePromise);
+    return { deferredClaimRelease: false };
+  } catch (error) {
+    warnings.push(c12Warning(String(error).includes('timeout') ? `${label}-timeout` : `${label}-failed`, error, detail));
+    if (!settled) return { deferredClaimRelease: true };
+    return { deferredClaimRelease: false };
+  }
+}
+async function c12CloseCreatedWindow(windowId, tabId, warnings) {
+  let targetTabId = Number.isInteger(tabId) ? tabId : null;
+  if (!Number.isInteger(targetTabId)) {
+    try {
+      const tabs = await c12Bounded('created-window-query', () => chrome.tabs.query({ windowId }));
+      const ids = tabs.filter((tab) => Number.isInteger(tab?.id)).map((tab) => tab.id);
+      if (ids.length !== 1) {
+        warnings.push(c12Warning('created-tab-ambiguous', new Error('created window tab identity is ambiguous'), { windowId, tabIds: ids }));
+        return;
+      }
+      [targetTabId] = ids;
+    } catch (error) {
+      warnings.push(c12Warning(String(error).includes('timeout') ? 'created-window-query-timeout' : 'created-window-query-failed', error, { windowId }));
+      return;
+    }
+  }
+  const claim = { tabId: targetTabId, windowId, token: Symbol('topology-created-close-claim') };
+  if (globalThis.m7TabCloseClaims?.has(targetTabId)) {
+    warnings.push(c12Warning('created-close-claim-conflict', new Error('topology close claim already held'), { windowId, tabId: targetTabId }));
+    return;
+  }
+  globalThis.m7TabCloseClaims.set(targetTabId, claim);
+  const sameClaim = () => globalThis.m7TabCloseClaims?.get(targetTabId) === claim;
+  let deferredClaimRelease = false;
+  try {
+    try { await c12Bounded('created-close-state-queue-barrier', () => stateQueue); }
+    catch (error) {
+      warnings.push(c12Warning(String(error).includes('timeout') ? 'created-close-state-queue-timeout' : 'created-close-state-barrier-failed', error, { windowId, tabId: targetTabId }));
+      return;
+    }
+    let current;
+    try { current = await c12Bounded('created-close-state-read', () => loadFleetState()); }
+    catch (error) {
+      warnings.push(c12Warning(String(error).includes('timeout') ? 'created-close-proof-timeout' : 'created-close-proof-state-read', error, { windowId, tabId: targetTabId }));
+      return;
+    }
+    if (current.version !== 2 || !sameClaim()) {
+      warnings.push(c12Warning('created-close-proof-failed', new Error('created tab close proof failed'), { windowId, tabId: targetTabId }));
+      return;
+    }
+    if (Object.values(current.workers || {}).some((worker) => worker.tabId === targetTabId)) {
+      warnings.push(c12Warning('created-close-owned', new Error('created tab is already durably registered'), { windowId, tabId: targetTabId }));
+      return;
+    }
+    if (!sameClaim()) {
+      warnings.push(c12Warning('created-close-claim-lost', new Error('topology close claim changed'), { windowId, tabId: targetTabId }));
+      return;
+    }
+    const close = await c12ClaimedTabRemove(targetTabId, claim, warnings, { windowId, tabId: targetTabId }, 'created-tab-close');
+    deferredClaimRelease = close.deferredClaimRelease;
+  } finally {
+    if (!deferredClaimRelease) c12ReleaseClaim(targetTabId, claim);
+  }
+}
+async function c12CloseRemovedBinding(intent, warnings) {
+  const sameClaim = () => globalThis.m7TabCloseClaims?.get(intent.tabId) === intent.claim;
+  const finalProof = async (stage) => {
+    if (!sameClaim()) { warnings.push(c12Warning('close-claim-lost', new Error('topology close claim changed'), { ...intent, stage })); return false; }
+    try {
+      const latest = await c12Bounded(`${stage}-state-read`, () => loadFleetState());
+      if (latest.version !== 2 || Object.values(latest.workers || {}).some((worker) => worker.tabId === intent.tabId) || !sameClaim()) {
+        warnings.push(c12Warning('close-proof-failed', new Error('topology close ownership proof failed'), { ...intent, stage }));
+        return false;
+      }
+      return true;
+    } catch (error) {
+      warnings.push(c12Warning(String(error).includes('timeout') ? 'close-proof-timeout' : 'close-proof-state-read', error, { ...intent, stage }));
+      return false;
+    }
+  };
+  let current;
+  try { current = await c12Bounded('remove-pre-close-state-read', () => loadFleetState()); }
+  catch (error) { warnings.push(c12Warning('remove-pre-close-state-read', error, intent)); return; }
+  if (current.version !== 2 || Object.values(current.workers || {}).some((worker) => worker.tabId === intent.tabId) || !sameClaim()) return;
+  if (!await finalProof('tab-remove')) return { deferredClaimRelease: false };
+  return c12ClaimedTabRemove(intent.tabId, intent.claim, warnings, intent, 'tab-remove');
+}
+async function c12PostUnregisterCleanup(intent, warnings) {
+  liveHeartbeats.delete(intent.workerId);
+  try { await c9BoundedCleanup('warm-idle-alarm-clear', () => clearWarmIdleAlarm(intent.workerId)); }
+  catch (error) { warnings.push(c12Warning(String(error).includes('timeout') ? 'warm-idle-alarm-clear-timeout' : 'warm-idle-alarm-clear-failed', error, intent)); }
+  try { await c9BoundedCleanup('badge-update', () => updateBadge(intent.tabId)); }
+  catch (error) { warnings.push(c12Warning(String(error).includes('timeout') ? 'badge-update-timeout' : 'badge-update-failed', error, intent)); }
+  let current;
+  try { current = await c9BoundedCleanup('pre-send-state-read', () => loadFleetState()); }
+  catch (error) { warnings.push(c12Warning('pre-send-state-read', error, intent)); return; }
+  if (current.version !== 2 || Object.values(current.workers || {}).some((worker) => worker.tabId === intent.tabId)) return;
+  try {
+    await c7SendStopWithTimeout(intent.tabId, { type: 'fleet:registration-changed', registered: false, expectedWorkerId: intent.workerId });
+  } catch (error) {
+    warnings.push(c12Warning(String(error).includes('timeout') ? 'send-timeout' : 'send-failed', error, intent));
+  }
+}
+async function c12RemovalCandidate(state, workerId, roleId, at) {
+  const worker = state.workers[workerId];
+  if (!worker || worker.tabId == null) return { removable: false, reason: 'worker-missing' };
+  const result = c12Module().removableWorkerV2(state, workerId, { now: at, heartbeatMaxAgeMs: C12_HEARTBEAT_MAX_AGE_MS, targetRole: roleId });
+  if (!result.removable) return result;
+  if (worker.windowId !== undefined && worker.windowId !== null && !Number.isInteger(worker.windowId)) return { removable: false, reason: 'window-identity-invalid' };
+  return result;
+}
+async function c12UnregisterExact(intent) {
+  return mutateFleet((state) => {
+    const commitAt = now();
+    const worker = state.workers[intent.workerId];
+    if (!worker || worker.tabId !== intent.tabId || worker.windowId !== intent.windowId
+      || worker.enabled !== true || worker.topologyManaged !== true
+      || canonicalRole(worker.role) !== intent.role) return { removed: false, code: 'topology-removal-stale' };
+    const check = c12Module().removableWorkerV2(state, intent.workerId, {
+      now: commitAt, heartbeatMaxAgeMs: C12_HEARTBEAT_MAX_AGE_MS, targetRole: intent.role,
+    });
+    if (!check.removable) return { removed: false, code: `topology-removal-${check.reason}` };
+    const outcome = globalThis.ModelFleetStateM7C9.unregisterWorkerV2(state, { workerId: intent.workerId, at: commitAt });
+    if (!outcome.result.removed) return outcome.result;
+    replaceC3State(state, outcome.state);
+    return outcome.result;
+  });
+}
+async function c12RemoveOne(roleId, warnings) {
+  const fresh = await loadFleetState();
+  if (fresh.version !== 2) return { removed: false, deferred: true };
+  const previewAt = now();
+  const plan = c12Module().topologyPlanV2(fresh, { now: previewAt, heartbeatMaxAgeMs: C12_HEARTBEAT_MAX_AGE_MS });
+  if ((plan.current[roleId] || 0) <= (plan.desired[roleId] || 0)) return { removed: false, deferred: false };
+  const candidate = plan.candidates[roleId]?.[0];
+  if (!candidate) return { removed: false, deferred: true };
+  const proof = await c12RemovalCandidate(fresh, candidate.id, roleId, previewAt);
+  if (!proof.removable) return { removed: false, deferred: true, reason: proof.reason };
+  const workerId = candidate.id;
+  const tabId = candidate.tabId;
+  const windowId = candidate.windowId;
+  const claim = { workerId, tabId, windowId, role: roleId, token: Symbol('topology-close-claim') };
+  if (globalThis.m7TabCloseClaims.has(tabId)) return { removed: false, deferred: true, reason: 'topology-close-claimed' };
+  globalThis.m7TabCloseClaims.set(tabId, claim);
+  let deferredClaimRelease = false;
+  try {
+    const removedCommit = await c12UnregisterExact({ workerId, tabId, windowId, role: roleId });
+    const removed = removedCommit.result;
+    if (!removed?.removed) return { removed: false, deferred: true, reason: removed?.code || 'unregister-not-removed' };
+    const intent = { workerId, tabId, windowId, assignmentId: null, claim };
+    await c12PostUnregisterCleanup(intent, warnings);
+    const close = await c12CloseRemovedBinding(intent, warnings);
+    deferredClaimRelease = close?.deferredClaimRelease === true;
+    if (deferredClaimRelease) return { removed: true, workerId, closePending: true };
+    return { removed: true, workerId };
+  } finally {
+    if (!deferredClaimRelease) c12ReleaseClaim(tabId, claim);
+  }
+}
+async function c12CreateOne(roleId, at, warnings) {
+  const before = await loadFleetState();
+  if (before.version !== 2) return { created: false, deferred: true };
+  const plan = c12Module().topologyPlanV2(before, { now: at, heartbeatMaxAgeMs: C12_HEARTBEAT_MAX_AGE_MS });
+  if ((plan.current[roleId] || 0) >= (plan.desired[roleId] || 0)) return { created: false, deferred: false };
+  let created;
+  try { created = await c12Bounded('topology-window-create', () => chrome.windows.create({ url: 'https://chatgpt.com/', focused: false, type: 'normal' })); }
+  catch (error) { warnings.push(c12Warning(String(error).includes('timeout') ? 'window-create-timeout' : 'window-create-failed', error, { role: roleId })); return { created: false, deferred: true }; }
+  const windowId = created?.id;
+  if (!Number.isInteger(windowId)) { warnings.push(c12Warning('window-create-invalid', new Error('created topology window has no id'), { role: roleId })); return { created: false, deferred: true }; }
+  let tab;
+  try {
+    const tabs = await c12Bounded('topology-tab-query', () => chrome.tabs.query({ windowId }));
+    const ids = tabs.filter((item) => Number.isInteger(item?.id)).map((item) => item.id);
+    if (ids.length !== 1) {
+      warnings.push(c12Warning('topology-created-tab-ambiguous', new Error('created topology window tab identity is ambiguous'), { role: roleId, windowId, tabIds: ids }));
+      await c12CloseCreatedWindow(windowId, null, warnings);
+      return { created: false, deferred: true };
+    }
+    tab = tabs.find((item) => item.id === ids[0]);
+    await c12Bounded('topology-tab-ready', () => waitForTabReady(tab.id, 30000));
+  } catch (error) {
+    warnings.push(c12Warning(String(error).includes('timeout') ? 'topology-tab-timeout' : 'topology-tab-failed', error, { role: roleId, windowId }));
+    await c12CloseCreatedWindow(windowId, tab?.id, warnings);
+    return { created: false, deferred: true };
+  }
+  const beforeRegistration = await loadFleetState();
+  if (beforeRegistration.version !== 2) { await c12CloseCreatedWindow(windowId, tab.id, warnings); return { created: false, deferred: true }; }
+  const latestPlan = c12Module().topologyPlanV2(beforeRegistration, { now: at, heartbeatMaxAgeMs: C12_HEARTBEAT_MAX_AGE_MS });
+  if ((latestPlan.current[roleId] || 0) >= (latestPlan.desired[roleId] || 0)) {
+    await c12CloseCreatedWindow(windowId, tab.id, warnings);
+    return { created: false, deferred: false };
+  }
+  let stableTab;
+  try { stableTab = await c12Bounded('topology-supported-tab', () => supportedTab(tab.id)); }
+  catch (error) {
+    warnings.push(c12Warning(String(error).includes('timeout') ? 'topology-supported-tab-timeout' : 'topology-supported-tab-failed', error, { role: roleId, tabId: tab.id }));
+    await c12CloseCreatedWindow(windowId, tab.id, warnings);
+    return { created: false, deferred: true };
+  }
+  if (!stableTab) { warnings.push(c12Warning('topology-supported-tab-failed', new Error('created tab is no longer supported'), { role: roleId, tabId: tab.id })); await c12CloseCreatedWindow(windowId, tab.id, warnings); return { created: false, deferred: true }; }
+  const registrationAt = now();
+  let committed;
+  try {
+    committed = await mutateFleet((state) => {
+      const livePlan = c12Module().topologyPlanV2(state, { now: registrationAt, heartbeatMaxAgeMs: C12_HEARTBEAT_MAX_AGE_MS });
+      if ((livePlan.current[roleId] || 0) >= (livePlan.desired[roleId] || 0)) return { capacitySatisfied: true };
+      if (globalThis.m7TabCloseClaims?.has(stableTab.id)) return { capacitySatisfied: true, code: 'topology-tab-close-claimed' };
+      const outcome = c10Module().upsertWorkerBindingV2(state, { tab: stableTab, patch: { role: roleId, topologyManaged: true }, at: registrationAt });
+      replaceC3State(state, outcome.state);
+      return outcome.result;
+    });
+  } catch (error) {
+    warnings.push(c12Warning(String(error).includes('timeout') ? 'topology-register-timeout' : 'topology-register-failed', error, { role: roleId, tabId: stableTab.id }));
+    await c12CloseCreatedWindow(windowId, stableTab.id, warnings);
+    return { created: false, deferred: true };
+  }
+  if (committed.result?.capacitySatisfied) { await c12CloseCreatedWindow(windowId, stableTab.id, warnings); return { created: false, deferred: false }; }
+  const workerId = committed.result?.worker?.id;
+  if (!workerId) { warnings.push(c12Warning('topology-register-invalid', new Error('registration returned no worker'), { role: roleId, tabId: stableTab.id })); return { created: false, deferred: true }; }
+  const registration = await c10PostRegistrationV2(committed, stableTab.id);
+  for (const warning of registration.cleanupWarnings || []) warnings.push({ ...warning, role: roleId, workerId });
+  try {
+    await mutateFleet((state) => {
+      const worker = state.workers[workerId];
+      if (!worker || worker.tabId !== stableTab.id || canonicalRole(worker.role) !== roleId || worker.topologyManaged !== true) throw new Error('topology-created-proof-failed');
+      replaceC3State(state, globalThis.ModelFleetStateM7C3.appendJournal(state, 'topology.worker_created', `${workerId} created for ${roleId}`, { workerId, role: roleId, tabId: stableTab.id, windowId }, at));
+    });
+  } catch (error) {
+    warnings.push(c12Warning('topology-created-journal-failed', error, { workerId, role: roleId, tabId: stableTab.id }));
+  }
+  return { created: true, workerId };
+}
+async function reconcileFleetTopologyC12(reason = 'topology reconciliation') {
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) return reconcileFleetTopologyC12Legacy();
+  if (globalThis.topologyReconcilePromiseC12) return globalThis.topologyReconcilePromiseC12;
+  globalThis.topologyReconcilePromiseC12 = (async () => {
+    const created = []; const removed = []; const errors = []; const cleanupWarnings = []; const at = now();
+    let lastAuthenticatedCounts = c12Module().topologyPlanV2(loaded, { now: at, heartbeatMaxAgeMs: C12_HEARTBEAT_MAX_AGE_MS });
+    try { await c9ReconcileStaleWorkerBindings(reason); }
+    catch (error) {
+      errors.push(`stale-binding: ${String(error)}`);
+      try { const fresh = await loadFleetState(); if (fresh.version !== 2) throw new Error('topology-version-changed'); }
+      catch (freshError) { errors.push(`fresh-state: ${String(freshError)}`); }
+    }
+    for (const roleId of ['coordinator', 'implementation', 'review']) {
+      while (true) {
+        let result;
+        try { result = await c12RemoveOne(roleId, cleanupWarnings); }
+        catch (error) { errors.push(`${roleId}: ${String(error)}`); break; }
+        if (result.removed) { removed.push(result.workerId); continue; }
+        break;
+      }
+    }
+    for (const roleId of ['coordinator', 'implementation', 'review']) {
+      while (true) {
+        let result;
+        try { result = await c12CreateOne(roleId, at, cleanupWarnings); }
+        catch (error) { errors.push(`${roleId}: ${String(error)}`); break; }
+        if (result.created) { created.push(result.workerId); continue; }
+        break;
+      }
+    }
+    let finalState = null;
+    let finalCounts = { desired: {}, current: {}, excess: {} };
+    try {
+      finalState = await c12Bounded('topology-final-state-read', () => loadFleetState());
+      finalCounts = c12Module().topologyPlanV2(finalState, { now: at, heartbeatMaxAgeMs: C12_HEARTBEAT_MAX_AGE_MS });
+      lastAuthenticatedCounts = finalCounts;
+    } catch (error) {
+      cleanupWarnings.push(c12Warning(String(error).includes('timeout') ? 'topology-final-state-timeout' : 'topology-final-state-failed', error));
+      finalCounts = lastAuthenticatedCounts;
+    }
+    let deferredRemovals = Object.values(finalCounts.excess).reduce((sum, value) => sum + value, 0);
+    const summary = { created, removed, deferredRemovals, errors };
+    let summaryCounts = null;
+    try {
+      const journaled = await mutateFleet((state) => {
+        const current = c12Module().topologyPlanV2(state, { now: at, heartbeatMaxAgeMs: C12_HEARTBEAT_MAX_AGE_MS });
+        summaryCounts = { desired: current.desired, current: current.current };
+        const next = globalThis.ModelFleetStateM7C3.appendJournal(state, 'topology.reconciled', `fleet topology reconciled: +${created.length} / -${removed.length}`, { ...summary, counts: { desired: current.desired, current: current.current } }, at);
+        replaceC3State(state, next);
+        return { counts: { desired: current.desired, current: current.current } };
+      });
+      finalState = journaled.state;
+    } catch (error) { cleanupWarnings.push(c12Warning('topology-reconciled-journal-failed', error)); }
+    if (summaryCounts) deferredRemovals = Object.keys(summaryCounts.current).reduce((sum, roleId) => sum + Math.max(0, Number(summaryCounts.current[roleId] || 0) - Number(summaryCounts.desired[roleId] || 0)), 0);
+    const resultCounts = summaryCounts || { desired: finalCounts.desired, current: finalCounts.current };
+    const result = { created, removed, deferredRemovals, errors, cleanupWarnings, counts: resultCounts };
+    schedule().catch(() => {});
+    return result;
+  })();
+  try { return await globalThis.topologyReconcilePromiseC12; }
+  finally { globalThis.topologyReconcilePromiseC12 = null; }
+}
+reconcileFleetTopology = reconcileFleetTopologyC12;
+
+// C13 v2 settings/control-intent overlay. Version-1 branches remain the
+// original inline mutations and response shapes; C14+ operator APIs remain
+// outside this boundary.
+importScripts('fleet-state-model-m7-c13.js');
+function c13Module() { return globalThis.ModelFleetStateM7C13; }
+const c13LegacySnapshot = publicSnapshot;
+
+async function setWorkspacePathC13Dispatch(message) {
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) {
+    const committed = await mutateFleet((state) => {
+      state.workspacePath = String(message.workspacePath || '').trim();
+      appendJournal(state, 'workspace.path.changed', state.workspacePath || 'Workspace path cleared');
+    });
+    return { snapshot: c13LegacySnapshot(committed.state) };
+  }
+  const at = now();
+  const committed = await mutateFleet((state) => {
+    const outcome = c13Module().setWorkspacePathV2(state, { workspacePath: message.workspacePath, at });
+    replaceC3State(state, outcome.state);
+    return outcome.result;
+  });
+  return committed.result;
+}
+
+async function setGoalC13Dispatch(message) {
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) {
+    const committed = await mutateFleet((state) => {
+      state.goal = String(message.goal || '').trim();
+      state.lastGoalContinuationKey = '';
+      appendJournal(state, 'goal.changed', state.goal || 'Goal cleared');
+    });
+    schedule().catch(() => {});
+    return { snapshot: c13LegacySnapshot(committed.state) };
+  }
+  const at = now();
+  const committed = await mutateFleet((state) => {
+    const outcome = c13Module().setGoalV2(state, { goal: message.goal, at });
+    replaceC3State(state, outcome.state);
+    return outcome.result;
+  });
+  schedule().catch(() => {});
+  return committed.result;
+}
+
+async function updatePolicyC13Dispatch(message) {
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) {
+    const committed = await mutateFleet((state) => {
+      const patch = message.patch || {};
+      if (Object.prototype.hasOwnProperty.call(patch, 'maxConcurrency')) {
+        state.policy.maxConcurrency = Math.max(1, Math.min(64, Number(patch.maxConcurrency || 1)));
+      }
+      if (Object.prototype.hasOwnProperty.call(patch, 'paused')) state.policy.paused = patch.paused === true;
+      if (Object.prototype.hasOwnProperty.call(patch, 'authorityEnabled')) state.policy.authorityEnabled = patch.authorityEnabled === true;
+      if (Object.prototype.hasOwnProperty.call(patch, 'activeWorkerWindows')) state.policy.activeWorkerWindows = patch.activeWorkerWindows !== false;
+      if (Object.prototype.hasOwnProperty.call(patch, 'warmIdleMs')) state.policy.warmIdleMs = boundedWarmIdleMs(patch.warmIdleMs);
+      appendJournal(state, 'policy.changed', 'Execution policy updated', { ...state.policy });
+    });
+    schedule().catch(() => {});
+    return { snapshot: c13LegacySnapshot(committed.state) };
+  }
+  const at = now();
+  const committed = await mutateFleet((state) => {
+    const outcome = c13Module().updatePolicyV2(state, { patch: message.patch || {}, at });
+    replaceC3State(state, outcome.state);
+    return outcome.result;
+  });
+  schedule().catch(() => {});
+  return committed.result;
+}
+
+// C14 v2 operator work overlay. Legacy handlers remain isolated behind the
+// persisted-version branch and retain their snapshot response contracts.
+importScripts('fleet-state-model-m7-c14.js');
+function c14Module() { return globalThis.ModelFleetStateM7C14; }
+const c14LegacySnapshot = globalThis['publicSnapshot'];
+const c14LegacyCreateTask = globalThis['createTaskInState'];
+const c14LegacyQueueMessage = globalThis['queueSemanticMessage'];
+const c14LegacyAdmission = globalThis['scheduleMessageUntilAdmitted'];
+const C14_ADMISSION_TIMEOUT_MS = C7_STOP_TRANSPORT_TIMEOUT_MS;
+
+async function c14AdmissionBounded(stage, operation) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(operation),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          const error = new Error(`${stage}-timeout`);
+          error.reason = stage === 'schedule' ? 'schedule-timeout' : 'admission-state-read-timeout';
+          reject(error);
+        }, C14_ADMISSION_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function scheduleMessageUntilAdmittedC14(messageId, maxAttempts = 5) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    await c14AdmissionBounded('schedule', () => schedule());
+    const state = await c14AdmissionBounded('admission-state-read', () => loadFleetState());
+    const message = state.messages.find((item) => item.id === messageId);
+    if (!message || message.phase !== 'queued') return message || null;
+    if (attempt + 1 < maxAttempts) await delay(250);
+  }
+  const finalState = await c14AdmissionBounded('admission-state-read', () => loadFleetState());
+  return finalState.messages.find((item) => item.id === messageId) || null;
+}
+
+async function createTaskC14Dispatch(message) {
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) {
+    const committed = await mutateFleet((state) => c14LegacyCreateTask(state, {
+      title: message.title,
+      prompt: message.prompt,
+      role: message.role,
+      priority: message.priority,
+      dependencies: message.dependencies,
+      createdByRole: 'operator',
+    }, { allowCoordinator: true }));
+    schedule().catch(() => {});
+    return { task: committed.result, snapshot: c14LegacySnapshot(committed.state) };
+  }
+  const createdAt = now();
+  const committed = await mutateFleet((state) => {
+    const outcome = c14Module().createTaskV2(state, {
+      title: message.title,
+      prompt: message.prompt,
+      role: message.role,
+      priority: message.priority,
+      dependencies: message.dependencies,
+    }, { createdAt });
+    replaceC3State(state, outcome.state);
+    return outcome.result;
+  });
+  schedule().catch(() => {});
+  return committed.result;
+}
+
+async function retryTaskC14Dispatch(message) {
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) {
+    const committed = await mutateFleet((state) => {
+      const task = state.tasks[message.taskId];
+      if (!task) throw new Error('task not found');
+      if (task['status'] === 'running') throw new Error('task is currently running');
+      task['status'] = 'pending';
+      task.assignedWorkerId = null;
+      task['assignmentId'] = null;
+      task.result = '';
+      task['statusNote'] = '';
+      task.autoRecoveryAttempts = 0;
+      task.lastAutoRecoveryReason = '';
+      appendJournal(state, 'task.retried', `${task.id} queued for retry`);
+    });
+    schedule().catch(() => {});
+    return { snapshot: c14LegacySnapshot(committed.state) };
+  }
+  const at = now();
+  const committed = await mutateFleet((state) => {
+    const outcome = c14Module().retryTaskV2(state, { taskId: message.taskId, at });
+    replaceC3State(state, outcome.state);
+    return outcome.result;
+  });
+  schedule().catch(() => {});
+  return committed.result;
+}
+
+async function sendMessageC14Dispatch(message) {
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) {
+    const committed = await mutateFleet((state) => {
+      const target = String(message.toWorkerId || '').trim();
+      if (target !== 'operator' && !state.workers[target]) throw new Error('target worker not found');
+      const queued = c14LegacyQueueMessage(state, { from: 'operator', toWorkerId: target, body: message.body, taskId: message.taskId || null });
+      if (!queued.body) throw new Error('message body is required');
+      return queued;
+    });
+    let scheduleError = null;
+    try { await c14LegacyAdmission(committed.result.id); }
+    catch (error) { scheduleError = String(error); }
+    return { message: committed.result, scheduleError, snapshot: c14LegacySnapshot(await loadFleetState()) };
+  }
+  const createdAt = now();
+  const committed = await mutateFleet((state) => {
+    const outcome = c14Module().queueMessageV2(state, {
+      toWorkerId: message.toWorkerId,
+      body: message.body,
+      taskId: message.taskId || null,
+    }, { createdAt });
+    replaceC3State(state, outcome.state);
+    return outcome.result;
+  });
+  let scheduleError = null;
+  try {
+    const admitted = await scheduleMessageUntilAdmittedC14(committed.result.message.id);
+    if (admitted && admitted.phase === 'queued') scheduleError = 'message admission attempts exhausted';
+  } catch (error) {
+    scheduleError = String(error);
+  }
+  return { message: committed.result.message, scheduleError };
+}
+
+// C15 v2 completed-record pruning overlay. The legacy status-based branch is
+// preserved inside the dispatcher for version 1 only.
+importScripts('fleet-state-model-m7-c15.js');
+function c15Module() { return globalThis.ModelFleetStateM7C15; }
+const c15LegacySnapshot = globalThis['publicSnapshot'];
+
+async function clearCompletedC15Dispatch() {
+  const loaded = await loadFleetState();
+  if (loaded.version !== 2) {
+    const committed = await mutateFleet((state) => {
+      for (const [id, task] of Object.entries(state.tasks)) {
+        if (task['status'] === 'done') delete state.tasks[id];
+      }
+      state.messages = state.messages.filter((message) => message['status'] !== 'done');
+      appendJournal(state, 'state.pruned', 'Completed tasks/messages cleared');
+    });
+    return { snapshot: c15LegacySnapshot(committed.state) };
+  }
+  const at = now();
+  const committed = await mutateFleet((state) => {
+    const outcome = c15Module().clearCompletedV2(state, { at });
+    replaceC3State(state, outcome.state);
+    return outcome.result;
+  });
+  return committed.result;
+}
+
+// C16 background projection/transport overlay.  Control-pane consumption and
+// the v2 persistence connection remain outside this slice.
+importScripts('fleet-state-model-m7-c16.js');
+const publicSnapshotC16Legacy = publicSnapshot;
+const broadcastSnapshotC16Legacy = broadcastSnapshot;
+const broadcastHeartbeatDeltaC16Legacy = broadcastHeartbeatDelta;
+function c16Module() { return globalThis.ModelFleetStateM7C16; }
+
+publicSnapshot = function publicSnapshotC16(state) {
+  if (state?.version !== 2) return publicSnapshotC16Legacy(state);
+  const observedAt = now();
+  return c16Module().projectPublicSnapshotV2(state, { observedAt });
+};
+
+async function broadcastSnapshotC16(state) {
+  if (state?.version !== 2) return broadcastSnapshotC16Legacy(state);
+  try {
+    const observedAt = now();
+    const snapshot = c16Module().projectPublicSnapshotV2(state, { observedAt });
+    await chrome.runtime.sendMessage({ type: 'fleet:snapshot-changed', snapshot });
+  } catch {
+    // No control pane listening, or projection was rejected.
+  }
+}
+broadcastSnapshot = broadcastSnapshotC16;
+
+async function broadcastHeartbeatDeltaC16(input, stateHint = null) {
+  if (stateHint?.version !== 2) return broadcastHeartbeatDeltaC16Legacy(input);
+  if (!stateHint && (!Array.isArray(input) && Object.values(input || {}).some((row) => Object.prototype.hasOwnProperty.call(row || {}, 'heartbeatAt')))) return broadcastHeartbeatDeltaC16Legacy(input);
+  const state = stateHint || await loadFleetState();
+  if (state?.version !== 2) return broadcastHeartbeatDeltaC16Legacy(input);
+  try {
+    const rows = Array.isArray(input)
+      ? input
+      : Object.entries(input || {}).map(([workerId, value]) => ({ workerId, ...value }));
+    const observations = rows.map((row) => ({
+      workerId: row.workerId,
+      observedAt: Number(row.observedAt ?? row.at ?? row.heartbeatAt),
+      ...(Object.prototype.hasOwnProperty.call(row, 'busy') ? { busy: row.busy } : {}),
+      ...(Object.prototype.hasOwnProperty.call(row, 'runtimeBusy') ? { busy: row.runtimeBusy } : {}),
+      ...(Object.prototype.hasOwnProperty.call(row, 'title') ? { title: row.title } : {}),
+      ...(Object.prototype.hasOwnProperty.call(row, 'url') ? { url: row.url } : {}),
+      ...(Object.prototype.hasOwnProperty.call(row, 'windowId') ? { windowId: row.windowId } : {}),
+    }));
+    const serverNow = Math.max(now(), ...observations.map((row) => row.observedAt));
+    const deltas = observations.map((row) => c16Module().projectHeartbeatDeltaV2({ ...row, serverNow }));
+    await chrome.runtime.sendMessage({ type: 'fleet:heartbeats-v2', deltas, serverNow });
+  } catch {
+    // Heartbeat deltas are display-only and listener absence is fail-soft.
+  }
+}
+broadcastHeartbeatDelta = broadcastHeartbeatDeltaC16;
+
+const flushWorkerHeartbeatsC16Legacy = flushWorkerHeartbeats;
+flushWorkerHeartbeats = async function flushWorkerHeartbeatsC16() {
+  const pending = new Map(liveHeartbeats);
+  const result = await flushWorkerHeartbeatsC16Legacy();
+  if (result?.state?.version === 2 && pending.size) {
+    const observations = [...pending.entries()].map(([workerId, row]) => ({ workerId, ...row }));
+    await broadcastHeartbeatDeltaC16(observations, result.state);
+  }
+  return result;
+};
+
+async function getTabWorkerStateC16Dispatch(message) {
+  const state = await loadFleetState();
+  if (state?.version !== 2) return { worker: workerForTab(state, message.tabId) || null };
+  const workerId = workerIdForTabInState(state, message.tabId);
+  if (!workerId) return { worker: null };
+  return { worker: c16Module().projectWorkerV2(state, workerId, { observedAt: now() }) };
+}
+
+// C18 is the persistence connection. C1 remains the schema/quiescence
+// authority; this boundary makes v2 the only runtime key after one successful
+// migration and routes every later load/mutate commit through v2 storage.
+importScripts('fleet-state-model-m7-c18.js');
+function c18Module() { return globalThis.ModelFleetStateM7C18; }
+let c18LoadInFlight = null;
+
+function c18MigrationInputs() {
+  const observations = [...liveHeartbeats.values()];
+  return {
+    liveHeartbeats: observations,
+    pendingCompletionHandoff: observations.some((row) => row?.pendingCompletion === true || row?.recoveringCompletion === true),
+  };
+}
+
+async function loadFleetStateC18() {
+  if (c18LoadInFlight) return c18LoadInFlight;
+  const observedAt = now();
+  const inputs = c18MigrationInputs();
+  c18LoadInFlight = c18Module().loadFleetStateV2(chrome.storage.local, {
+    ...inputs,
+    createdAt: observedAt,
+    migrationObservedAt: observedAt,
+    conversionAt: observedAt,
+  }).then((result) => result.state).finally(() => { c18LoadInFlight = null; });
+  return c18LoadInFlight;
+}
+
+async function saveFleetStateC18(state) {
+  return c18Module().saveFleetStateV2(chrome.storage.local, state);
+}
+
+loadFleetState = loadFleetStateC18;
+
+mutateFleet = function mutateFleetC18(mutator) {
+  const c18Queue = stateQueue;
+  const operation = c18Queue.then(async () => {
+    const state = await loadFleetStateC18();
+    const result = await mutator(state);
+    recordRoleActivity(state);
+    state.generation = Math.max(1, Number(state.generation || 0) + 1);
+    state.updatedAt = now();
+    const committedState = await saveFleetStateC18(state);
+    await broadcastSnapshot(committedState);
+    return { state: committedState, result };
+  });
+  stateQueue = operation.catch(() => {});
+  return operation;
+};
+
+// C19 closes the runtime authority boundary without deleting C1 migration or
+// v1 compatibility code.  These wrappers validate every runtime state at the
+// v2 load/save edge; they do not add a second storage key or authority path.
+importScripts('fleet-state-model-m7-c19.js');
+function c19Module() { return globalThis.ModelFleetStateM7C19; }
+const loadFleetStateC18Authority = loadFleetState;
+const saveFleetStateC18Authority = saveFleetStateC18;
+
+async function loadFleetStateC19() {
+  return c19Module().assertV2State(await loadFleetStateC18Authority());
+}
+
+async function saveFleetStateC19(state) {
+  return c19Module().assertV2State(await saveFleetStateC18Authority(state));
+}
+
+loadFleetState = loadFleetStateC19;
+saveFleetStateC18 = saveFleetStateC19;
+
+// C20/M8 is mechanical ownership only.  The existing background functions
+// remain the executable implementations; these registries make state and
+// protocol ownership explicit without changing their behavior or authority.
+importScripts('fleet-state.js', 'fleet-protocol.js');

@@ -88,8 +88,8 @@
   function normalizeSnapshot(value) {
     const source = value && typeof value === 'object' ? value : {};
     const policy = source.policy && typeof source.policy === 'object' ? source.policy : {};
-    const workers = source.workers && typeof source.workers === 'object' && !Array.isArray(source.workers) ? source.workers : {};
-    const tasks = source.tasks && typeof source.tasks === 'object' && !Array.isArray(source.tasks) ? source.tasks : {};
+    const workers = source.version === 2 ? (Array.isArray(source.workers) ? source.workers : []) : (source.workers && typeof source.workers === 'object' && !Array.isArray(source.workers) ? source.workers : {});
+    const tasks = source.version === 2 ? (Array.isArray(source.tasks) ? source.tasks : []) : (source.tasks && typeof source.tasks === 'object' && !Array.isArray(source.tasks) ? source.tasks : {});
     const roleCatalog = Array.isArray(source.roleCatalog) ? source.roleCatalog.filter((role) => role && typeof role.id === 'string') : [];
     const topology = source.topology && typeof source.topology === 'object' ? source.topology : {};
     const desiredRoleCounts = topology.desiredRoleCounts && typeof topology.desiredRoleCounts === 'object'
@@ -221,8 +221,8 @@
       const counts = roles[role] || (roles[role] = { running: 0, idle: 0, blocked: 0, offline: 0, total: 0 });
       counts.total += 1;
       if (worker.currentAssignmentId) counts.running += 1;
-      else if (worker.lifecycle === 'stale' || worker.lifecycle === 'offline' || !Number.isInteger(worker.tabId)) counts.offline += 1;
-      else if (worker.status === 'blocked') counts.blocked += 1;
+      else if (workerIsStale(worker) || workerLifecycle(worker) === 'offline') counts.offline += 1;
+      else if (workerStatus(worker) === 'blocked') counts.blocked += 1;
       else counts.idle += 1;
     }
     return roles;
@@ -324,9 +324,9 @@
   }
 
   function taskRunnable(task) {
-    if (!snapshot || task.status !== 'pending') return false;
+    if (!snapshot || taskPhase(task) !== 'pending') return false;
     if (String(task.workflowBlockReason || '').trim()) return false;
-    return (task.dependencies || []).every((id) => snapshot.tasks?.[id]?.status === 'done');
+    return c17() ? (task.waitingDependencyIds || []).length === 0 : (task.dependencies || []).every((id) => snapshot.tasks?.[id]?.status === 'done');
   }
 
   function messageTime(message) {
@@ -364,7 +364,7 @@
   }
 
   function renderMessageCard(message, operatorStyle = false, bodyMax = 700) {
-    const status = safeStatus(message.status, message.toWorkerId === 'operator' ? 'delivered' : 'unknown');
+    const status = safeStatus(messagePhase(message), message.toWorkerId === 'operator' ? 'delivered' : 'unknown');
     const statusClass = status === 'running' ? 'running' : status === 'done' || status === 'delivered' ? 'done' : status === 'cancelled' ? 'blocked' : 'pending';
     const response = message.response ? `<div class="small" style="margin-top:5px">response: ${escapeHtml(compact(message.response, 350))}</div>` : '';
     return `<div class="message ${operatorStyle ? 'operator' : ''}">
@@ -400,7 +400,7 @@
     const staleCounts = Object.fromEntries(catalog.map((role) => [role.id, 0]));
     for (const worker of workers().filter((worker) => worker.enabled !== false)) {
       const role = String(worker.role || 'coordinator');
-      if (worker.lifecycle === 'stale' || !Number.isInteger(worker.tabId)) staleCounts[role] = Number(staleCounts[role] || 0) + 1;
+      if (workerIsStale(worker)) staleCounts[role] = Number(staleCounts[role] || 0) + 1;
       else counts[role] = Number(counts[role] || 0) + 1;
     }
     const desired = snapshot?.topology?.desiredRoleCounts || {};
@@ -442,22 +442,22 @@
 
   function renderWorkers() {
     const list = workers().sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
-    const boundCount = list.filter((worker) => worker.enabled !== false && worker.lifecycle !== 'stale' && Number.isInteger(worker.tabId)).length;
+    const boundCount = list.filter((worker) => worker.enabled !== false && !workerIsStale(worker)).length;
     els.workerCount.textContent = `${list.length} slots · ${boundCount} bound`;
     if (!list.length) {
       els.workers.innerHTML = '<div class="empty">No workers registered. Open ChatGPT tabs, then register them.</div>';
       return;
     }
     els.workers.innerHTML = list.map((worker) => {
-      const age = worker.heartbeatAt ? Math.max(0, Math.round((snapshot.serverNow - worker.heartbeatAt) / 1000)) : null;
-      const lifecycle = safeStatus(worker.lifecycle, worker.currentAssignmentId ? 'running' : 'idle');
+      const age = workerHeartbeatAt(worker) ? Math.max(0, Math.round((snapshot.serverNow - workerHeartbeatAt(worker)) / 1000)) : null;
+      const lifecycle = workerLifecycle(worker, worker.currentAssignmentId ? 'running' : 'idle');
       const warmIdle = lifecycle === 'warm-idle';
       const activating = lifecycle === 'activating';
       const rotating = lifecycle === 'rotating';
-      const stale = worker.lifecycle === 'stale' || !Number.isInteger(worker.tabId) || age === null || age > HEARTBEAT_STALE_SECONDS;
-      const status = warmIdle ? 'warm' : rotating ? 'rotating' : activating ? 'waking' : stale ? 'offline' : safeStatus(worker.status, 'idle');
+      const stale = workerIsStale(worker) || age === null || age > HEARTBEAT_STALE_SECONDS;
+      const status = warmIdle ? 'warm' : rotating ? 'rotating' : activating ? 'waking' : stale ? 'offline' : workerStatus(worker, 'idle');
       const statusClass = status === 'running' || status === 'waking' ? 'running' : status === 'blocked' || status === 'offline' ? 'blocked' : 'pending';
-      const assignment = worker.currentTaskId || worker.currentMessageId || 'idle';
+      const assignment = workerAssignment(worker);
       const queue = snapshot?.diagnostics?.queueByWorker?.[worker.id] || {};
       const queuedCount = Math.max(0, Number(queue.queuedCount || 0));
       const oldestQueueAgeMs = Number(queue.oldestQueuedAt || 0)
@@ -472,7 +472,7 @@
         : '';
       return `<div class="worker" data-worker="${escapeHtml(worker.id)}">
         <div class="topline"><div><div class="name tab-name" title="${escapeHtml(workerTabTitle(worker))}">${escapeHtml(workerTabTitle(worker))}</div><div class="role">${escapeHtml(worker.id)} · ${escapeHtml(worker.role)}</div></div><span class="pill ${statusClass}">${escapeHtml(status.toUpperCase())}</span></div>
-        <div class="small" style="margin-top:6px">${escapeHtml(assignment)} · ${escapeHtml(lifecycle)} · ${worker.lifecycle === 'stale' ? 'stale / unbound' : `tab ${worker.tabId ?? '—'} · window ${worker.windowId ?? '—'} · heartbeat ${age === null ? 'never' : `${age}s ago`}`}</div>
+        <div class="small" style="margin-top:6px">${escapeHtml(assignment)} · ${escapeHtml(lifecycle)} · ${workerIsStale(worker) ? 'stale / unbound' : `tab ${worker.tabId ?? '—'} · window ${worker.windowId ?? '—'} · heartbeat ${age === null ? 'never' : `${age}s ago`}`}</div>
         <div class="small">Queue · ${escapeHtml(queueDetail)}</div>
         <div class="small">Chat turns · ${Math.max(0, Number(worker.chatTurnCount || 0))} / ${roleTurnLimit(worker.role)}${worker.chatRotationPending ? ' · rotation pending' : ''}</div>
         <div class="small" title="${escapeHtml(urlInfo.full)}">URL · ${escapeHtml(urlInfo.short)}</div>
@@ -495,20 +495,20 @@
     for (const worker of workers()) {
       const root = roots.get(worker.id);
       if (!root) continue;
-      const age = worker.heartbeatAt ? Math.max(0, Math.round((snapshot.serverNow - worker.heartbeatAt) / 1000)) : null;
-      const lifecycle = safeStatus(worker.lifecycle, worker.currentAssignmentId ? "running" : "idle");
+      const age = workerHeartbeatAt(worker) ? Math.max(0, Math.round((snapshot.serverNow - workerHeartbeatAt(worker)) / 1000)) : null;
+      const lifecycle = workerLifecycle(worker, worker.currentAssignmentId ? "running" : "idle");
       const warmIdle = lifecycle === "warm-idle";
       const activating = lifecycle === "activating";
       const rotating = lifecycle === "rotating";
-      const stale = worker.lifecycle === 'stale' || !Number.isInteger(worker.tabId) || age === null || age > HEARTBEAT_STALE_SECONDS;
-      const status = warmIdle ? "warm" : rotating ? "rotating" : activating ? "waking" : stale ? "offline" : safeStatus(worker.status, "idle");
+      const stale = workerIsStale(worker) || age === null || age > HEARTBEAT_STALE_SECONDS;
+      const status = warmIdle ? "warm" : rotating ? "rotating" : activating ? "waking" : stale ? "offline" : workerStatus(worker, "idle");
       const statusClass = status === "running" || status === "waking" ? "running" : status === "blocked" || status === "offline" ? "blocked" : "pending";
       const pill = root.querySelector(".topline .pill");
       if (pill) {
         pill.className = `pill ${statusClass}`;
         pill.textContent = status.toUpperCase();
       }
-      const assignment = worker.currentTaskId || worker.currentMessageId || "idle";
+      const assignment = workerAssignment(worker);
       const heartbeatLine = root.querySelector(".small");
       if (heartbeatLine) heartbeatLine.textContent = `${assignment} · ${lifecycle} · heartbeat ${age === null ? "never" : `${age}s ago`}`;
     }
@@ -526,7 +526,7 @@
     }
     els.tasks.innerHTML = list.map((task) => {
       const runnable = taskRunnable(task);
-      const taskStatus = safeStatus(task.status, 'pending');
+      const taskStatus = safeStatus(taskPhase(task), 'pending');
       const stateClass = taskStatus === 'cancelled' ? 'blocked' : ['running','done','blocked'].includes(taskStatus) ? taskStatus : 'pending';
       const stateLabel = runnable ? 'RUNNABLE' : taskStatus.toUpperCase();
       const result = task.result ? `<div class="task-result">${escapeHtml(compact(task.result))}</div>` : '';
@@ -534,7 +534,7 @@
       const retry = ['blocked', 'cancelled'].includes(taskStatus) ? `<button class="mini" data-action="retry-task" data-task="${escapeHtml(task.id)}">Retry</button>` : '';
       return `<div class="task">
         <div class="topline"><div><div class="name">${escapeHtml(task.id)} · ${escapeHtml(task.title)}</div><div class="small">${escapeHtml(task.role)} · priority ${task.priority || 0} · ${escapeHtml(deps)} · attempts ${task.attempts || 0}</div></div><span class="pill ${stateClass}">${escapeHtml(stateLabel)}</span></div>
-        <div class="small" style="margin-top:6px">${task.assignedWorkerId ? `owner ${escapeHtml(task.assignedWorkerId)}` : 'unowned'}${task.statusNote ? ` · ${escapeHtml(task.statusNote)}` : ''}${task.workflowBlockReason ? ` · gate: ${escapeHtml(task.workflowBlockReason)}` : ''}</div>
+        <div class="small" style="margin-top:6px">${taskOwner(task) ? `owner ${escapeHtml(taskOwner(task))}` : 'unowned'}${task.statusNote ? ` · ${escapeHtml(task.statusNote)}` : ''}${task.workflowBlockReason ? ` · gate: ${escapeHtml(task.workflowBlockReason)}` : ''}</div>
         ${result}${retry ? `<div style="margin-top:7px">${retry}</div>` : ''}
       </div>`;
     }).join('');
@@ -548,7 +548,7 @@
     els.allThreadsCount.textContent = String(allThreads.length);
     els.inboxCount.textContent = String(inbox.length);
     els.trafficCount.textContent = String(traffic.length);
-    els.messageMetric.textContent = String(list.filter((m) => ['queued','running'].includes(m.status)).length);
+    els.messageMetric.textContent = String(list.filter((m) => ['queued','running'].includes(messagePhase(m))).length);
 
     els.allThreads.innerHTML = allThreads.length
       ? allThreads.map((message) => renderMessageCard(message, message.toWorkerId === 'operator', 900)).join('')
@@ -564,7 +564,7 @@
 
     const current = els.messageTarget.value;
     els.messageTarget.innerHTML = '<option value="">Select live worker</option>' + workers()
-      .filter((w) => w.enabled && w.lifecycle !== 'stale' && Number.isInteger(w.tabId))
+      .filter((w) => w.enabled && !workerIsStale(w))
       .map((w) => `<option value="${escapeHtml(w.id)}" title="${escapeHtml(w.url || '')}">${escapeHtml(workerTargetLabel(w))}</option>`).join('');
     if ([...els.messageTarget.options].some((option) => option.value === current)) els.messageTarget.value = current;
   }
@@ -622,19 +622,19 @@
 
   function computeInvariants() {
     const list = workers();
-    const liveList = list.filter((w) => w.enabled !== false && w.lifecycle !== 'stale' && Number.isInteger(w.tabId));
+    const liveList = list.filter((w) => w.enabled !== false && !workerIsStale(w));
     const running = liveList.filter((w) => w.currentAssignmentId);
     const tabIds = liveList.map((w) => w.tabId);
     const assignmentIds = running.map((w) => w.currentAssignmentId);
     const uniqueTabs = new Set(tabIds).size === tabIds.length;
     const uniqueAssignments = new Set(assignmentIds).size === assignmentIds.length;
     const withinConcurrency = running.length <= Number(snapshot.policy.maxConcurrency || 1);
-    const taskOwners = tasks().filter((t) => t.status === 'running').every((task) => liveList.filter((w) => w.currentTaskId === task.id).length === 1);
-    const ownedWorkersActivated = running.every((worker) => ['activating', 'running'].includes(worker.lifecycle));
+    const taskOwners = tasks().filter((t) => taskPhase(t) === 'running').every((task) => liveList.filter((w) => w.assignmentSummary?.taskId === task.id || w.currentTaskId === task.id).length === 1);
+    const ownedWorkersActivated = running.every((worker) => ['activating', 'running'].includes(workerLifecycle(worker)));
     const enabledWorkers = liveList;
     const persistentWindowIds = enabledWorkers.filter((worker) => Number.isInteger(worker.windowId)).map((worker) => worker.windowId);
     const persistentWindows = !snapshot.policy.activeWorkerWindows || (persistentWindowIds.length === enabledWorkers.length && new Set(persistentWindowIds).size === persistentWindowIds.length);
-    const noSleepState = list.every((worker) => !Number.isInteger(worker.sleepTabId) && !['sleeping', 'parking'].includes(worker.lifecycle));
+    const noSleepState = list.every((worker) => !Number.isInteger(worker.sleepTabId) && !['sleeping', 'parking'].includes(workerLifecycle(worker)));
     return [
       ['Authority', snapshot.policy.authorityEnabled, snapshot.policy.authorityEnabled ? 'dispatch permitted' : 'revoked'],
       ['Unique tab ownership', uniqueTabs, `${new Set(tabIds).size}/${tabIds.length} unique`],
@@ -673,17 +673,17 @@
 
     const exceptions = [];
     for (const worker of workers()) {
-      const age = worker.heartbeatAt ? Math.round((snapshot.serverNow - worker.heartbeatAt) / 1000) : Infinity;
-      if (worker.lifecycle === 'stale' || !Number.isInteger(worker.tabId)) exceptions.push(`${worker.id} is stale / unbound`);
+      const age = workerHeartbeatAt(worker) ? Math.round((snapshot.serverNow - workerHeartbeatAt(worker)) / 1000) : Infinity;
+      if (workerIsStale(worker)) exceptions.push(`${worker.id} is stale / unbound`);
       else if (age > HEARTBEAT_STALE_SECONDS) exceptions.push(`${worker.id} heartbeat stale (${Number.isFinite(age) ? `${age}s` : 'never'})`);
-      if (worker.status === 'blocked') {
+      if (workerStatus(worker) === 'blocked') {
         exceptions.push(worker.id + ' is blocked' + (worker.lastDispatchError ? ': ' + worker.lastDispatchError : ''));
       }
     }
     for (const task of tasks()) {
-      if (task.status === 'blocked') exceptions.push(`${task.id} is blocked${task.statusNote ? `: ${task.statusNote}` : ''}`);
-      if (task.status === 'pending' && task.workflowBlockReason) exceptions.push(`${task.id} workflow blocked: ${task.workflowBlockReason}`);
-      else if (task.status === 'pending' && !taskRunnable(task) && (task.dependencies || []).some((id) => snapshot.tasks?.[id]?.status === 'blocked')) exceptions.push(`${task.id} waits on a blocked dependency`);
+      if (taskPhase(task) === 'blocked') exceptions.push(`${task.id} is blocked${task.statusNote ? `: ${task.statusNote}` : ''}`);
+      if (taskPhase(task) === 'pending' && task.workflowBlockReason) exceptions.push(`${task.id} workflow blocked: ${task.workflowBlockReason}`);
+      else if (taskPhase(task) === 'pending' && !taskRunnable(task) && (task.waitingDependencyIds || task.dependencies || []).some((id) => snapshot.tasks?.[id]?.phase === 'blocked' || snapshot.tasks?.[id]?.status === 'blocked')) exceptions.push(`${task.id} waits on a blocked dependency`);
     }
     els.exceptionCount.textContent = String(exceptions.length);
     els.exceptions.innerHTML = exceptions.length ? exceptions.map((text) => `<div class="exception"><strong>Attention</strong><div class="small">${escapeHtml(text)}</div></div>`).join('') : '<div class="empty">No current exceptions.</div>';
@@ -699,7 +699,7 @@
     els.healthText.textContent = healthy ? (snapshot.policy.paused ? 'Healthy · paused' : 'Healthy') : (snapshot.policy.authorityEnabled ? 'Attention required' : 'Authority revoked');
     els.healthDot.style.background = healthy ? 'var(--green)' : snapshot.policy.authorityEnabled ? 'var(--amber)' : 'var(--red)';
     els.goalInput.value = document.activeElement === els.goalInput ? els.goalInput.value : (snapshot.goal || '');
-    const live = list.filter((worker) => worker.enabled !== false && worker.lifecycle !== 'stale' && Number.isInteger(worker.tabId)).length;
+    const live = list.filter((worker) => worker.enabled !== false && !workerIsStale(worker)).length;
     els.workerMetric.textContent = `${active} / ${live}`;
     els.taskMetric.textContent = String(runnable);
     els.generation.textContent = `gen ${snapshot.generation}`;
@@ -724,7 +724,7 @@
 
   async function refresh() {
     const response = await send('fleet:get-snapshot');
-    snapshot = normalizeSnapshot(response.snapshot);
+    adoptResponse(response);
     render();
   }
 
@@ -734,7 +734,8 @@
       render();
       return;
     }
-    if (message?.type === "fleet:heartbeats" && snapshot && message.heartbeats) {
+    if (message?.type === 'fleet:heartbeats-v2' && snapshot?.version === 2 && Array.isArray(message.deltas)) { applyC17HeartbeatMessage(message); return; }
+    if (message?.type === "fleet:heartbeats" && snapshot?.version !== 2 && snapshot && message.heartbeats) {
       for (const [workerId, heartbeat] of Object.entries(message.heartbeats)) {
         const worker = snapshot.workers?.[workerId];
         if (!worker) continue;
@@ -742,8 +743,7 @@
       }
       snapshot.serverNow = Number(message.serverNow) || Date.now();
       updateHeartbeatDisplays();
-      renderRoleTimeline();
-    }
+      renderRoleTimeline(); }
   });
 
   els.roleTargets.addEventListener('click', (event) => {
@@ -754,7 +754,7 @@
     const next = button.dataset.action === 'role-plus' ? current + 1 : Math.max(0, current - 1);
     button.disabled = true;
     send('fleet:set-topology-role-count', { role, count: next }).then((response) => {
-      snapshot = normalizeSnapshot(response.snapshot);
+      adoptResponse(response);
       render();
       setStatus(`${role} target → ${next}`);
     }).catch((error) => setStatus(String(error), true)).finally(() => { button.disabled = false; });
@@ -774,7 +774,7 @@
     const limit = Math.max(1, Math.min(50, Math.trunc(Number(input.value) || 10)));
     input.disabled = true;
     send('fleet:set-role-turn-limit', { role, limit }).then((response) => {
-      snapshot = normalizeSnapshot(response.snapshot);
+      adoptResponse(response);
       render();
       setStatus(`${role} turns/chat → ${limit}`);
     }).catch((error) => {
@@ -787,7 +787,7 @@
     els.reconcileFleet.disabled = true;
     setStatus('Reconciling fleet windows…');
     send('fleet:reconcile-topology').then((response) => {
-      snapshot = normalizeSnapshot(response.snapshot);
+      adoptResponse(response);
       render();
       const warnings = Array.isArray(response.errors) ? response.errors.length : 0;
       const deferred = Number(response.deferredRemovals || 0);
@@ -807,14 +807,14 @@
     try { localStorage.setItem(ROLE_TIMELINE_RANGE_KEY, String(roleTimelineRangeMs)); } catch {}
     renderRoleTimeline();
   });
-  els.saveGoal.addEventListener('click', () => send('fleet:set-goal', { goal: els.goalInput.value }).then((response) => { snapshot = normalizeSnapshot(response.snapshot); render(); setStatus('Goal saved'); }).catch((error) => setStatus(String(error), true)));
+  els.saveGoal.addEventListener('click', () => send('fleet:set-goal', { goal: els.goalInput.value }).then((response) => { adoptResponse(response); render(); setStatus('Goal saved'); }).catch((error) => setStatus(String(error), true)));
 
   els.concurrency.addEventListener('input', () => { els.concurrencyValue.textContent = els.concurrency.value; });
-  els.concurrency.addEventListener('change', () => send('fleet:update-policy', { patch: { maxConcurrency: Number(els.concurrency.value) } }).then((response) => { snapshot = normalizeSnapshot(response.snapshot); render(); setStatus('Concurrency updated'); }).catch((error) => setStatus(String(error), true)));
+  els.concurrency.addEventListener('change', () => send('fleet:update-policy', { patch: { maxConcurrency: Number(els.concurrency.value) } }).then((response) => { adoptResponse(response); render(); setStatus('Concurrency updated'); }).catch((error) => setStatus(String(error), true)));
   els.pauseAll.addEventListener('click', () => {
     if (!snapshot) return;
     send('fleet:update-policy', { patch: { paused: !snapshot.policy.paused } }).then((response) => {
-      snapshot = normalizeSnapshot(response.snapshot);
+      adoptResponse(response);
       render();
       setStatus(snapshot.policy.paused ? 'Dispatch paused' : 'Dispatch resumed; queued work is now eligible');
     }).catch((error) => setStatus(String(error), true));
@@ -823,7 +823,7 @@
     if (!window.confirm('Pause dispatch, cancel active assignments, and cancel all queued worker messages?')) return;
     els.stopFlushStale.disabled = true;
     send('fleet:stop-and-flush-stale').then((response) => {
-      snapshot = normalizeSnapshot(response.snapshot);
+      adoptResponse(response);
       render();
       const warning = response.cancellationWarnings ? ` (${response.cancellationWarnings} warning(s))` : '';
       setStatus(`Stopped ${response.cancelledActive} active assignment(s); cancelled ${response.cancelledQueued} stale queued message(s)${warning}. Dispatch remains paused; click Resume dispatch before sending new work.`);
@@ -836,7 +836,7 @@
     const request = snapshot.policy.authorityEnabled
       ? send('fleet:kill-authority')
       : send('fleet:update-policy', { patch: { authorityEnabled: true, paused: false } });
-    request.then((response) => { snapshot = normalizeSnapshot(response.snapshot); render(); setStatus(snapshot.policy.authorityEnabled ? 'Authority restored' : 'Authority revoked'); }).catch((error) => setStatus(String(error), true));
+    request.then((response) => { adoptResponse(response); render(); setStatus(snapshot.policy.authorityEnabled ? 'Authority restored' : 'Authority revoked'); }).catch((error) => setStatus(String(error), true));
   });
 
   els.createTask.addEventListener('click', () => {
@@ -848,7 +848,7 @@
       priority: Number(els.taskPriority.value || 0),
       dependencies,
     }).then((response) => {
-      snapshot = normalizeSnapshot(response.snapshot);
+      adoptResponse(response);
       els.taskTitle.value = '';
       els.taskPrompt.value = '';
       els.taskDeps.value = '';
@@ -864,13 +864,13 @@
   els.sendMessage.addEventListener('click', () => {
     if (!els.messageTarget.value || !els.messageBody.value.trim()) return setStatus('Choose a worker and enter a message', true);
     send('fleet:send-message', { toWorkerId: els.messageTarget.value, body: els.messageBody.value }).then((response) => {
-      snapshot = normalizeSnapshot(response.snapshot);
+      adoptResponse(response);
       els.messageBody.value = '';
       render();
       const paused = snapshot.policy.paused === true;
       setStatus(response.scheduleError
         ? `Queued ${response.message.id}; scheduler error recorded in Journal`
-        : (response.message.status === 'running'
+        : (messagePhase(response.message) === 'running'
           ? `Dispatching ${response.message.id}`
           : (paused
             ? `Queued ${response.message.id}; dispatch is paused — click Resume dispatch`
@@ -886,7 +886,7 @@
     if (button.dataset.action === 'cancel-dispatch') {
       button.disabled = true;
       send('fleet:cancel-worker-dispatch', { workerId }).then((response) => {
-        snapshot = normalizeSnapshot(response.snapshot);
+        adoptResponse(response);
         render();
         setStatus(response.transportError ? `Dispatch cleared; local stop warning: ${response.transportError}` : `Cancelled ${response.assignmentId}`);
       }).catch((error) => {
@@ -895,19 +895,19 @@
       });
       return;
     }
-    if (button.dataset.action === 'unregister-worker') send('fleet:unregister-worker', { workerId }).then((response) => { snapshot = normalizeSnapshot(response.snapshot); render(); }).catch((error) => setStatus(String(error), true));
+    if (button.dataset.action === 'unregister-worker') send('fleet:unregister-worker', { workerId }).then((response) => { adoptResponse(response); render(); }).catch((error) => setStatus(String(error), true));
   });
 
   els.workers.addEventListener('change', (event) => {
     const select = event.target.closest('select[data-action="role-worker"]');
     if (!select) return;
-    send('fleet:set-worker-role', { workerId: select.dataset.worker, role: select.value }).then((response) => { snapshot = normalizeSnapshot(response.snapshot); render(); }).catch((error) => setStatus(String(error), true));
+    send('fleet:set-worker-role', { workerId: select.dataset.worker, role: select.value }).then((response) => { adoptResponse(response); render(); }).catch((error) => setStatus(String(error), true));
   });
 
   els.tasks.addEventListener('click', (event) => {
     const button = event.target.closest('button[data-action="retry-task"]');
     if (!button) return;
-    send('fleet:retry-task', { taskId: button.dataset.task }).then((response) => { snapshot = normalizeSnapshot(response.snapshot); render(); }).catch((error) => setStatus(String(error), true));
+    send('fleet:retry-task', { taskId: button.dataset.task }).then((response) => { adoptResponse(response); render(); }).catch((error) => setStatus(String(error), true));
   });
 
   els.viewTabs.addEventListener('click', (event) => {
@@ -961,4 +961,57 @@
   refreshTimer = setInterval(updateHeartbeatDisplays, 5000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh().catch(() => {}); });
   window.addEventListener('pagehide', () => { if (refreshTimer) clearInterval(refreshTimer); });
+
+  function applyC17HeartbeatMessage(message) {
+    try {
+      for (const delta of message.deltas) snapshot = globalThis.ModelFleetStateM7C17.applyHeartbeatViewDeltaV2(snapshot, delta);
+      updateHeartbeatDisplays();
+      renderRoleTimeline();
+    } catch (error) {
+      setStatus(String(error), true);
+    }
+  }
+
+  function adoptResponse(response) {
+    const normalize = normalizeSnapshot;
+    if (response?.snapshot) snapshot = normalize(response.snapshot);
+    else refresh().catch((error) => setStatus(String(error), true));
+  }
+
+  function c17() {
+    return snapshot?.version === 2 ? globalThis.ModelFleetStateM7C17 : null;
+  }
+
+  function workerStatus(worker, fallback = 'idle') {
+    return c17() ? c17().displayStatus(worker) : safeStatus(worker['status'], fallback);
+  }
+
+  function workerHeartbeatAt(worker) {
+    return c17() ? Number(worker.lastHeartbeatAt || 0) : Number(worker['heartbeatAt'] || 0);
+  }
+
+  function workerLifecycle(worker, fallback = 'idle') {
+    return c17() ? safeStatus(worker.lifecycleDisplay, fallback) : safeStatus(worker.lifecycle, fallback);
+  }
+
+  function workerIsStale(worker) {
+    return c17() ? worker.uiLifecycleStale === true || !Number.isInteger(worker.tabId) : worker.lifecycle === 'stale' || !Number.isInteger(worker.tabId);
+  }
+
+  function workerAssignment(worker) {
+    if (c17()) return c17().workerAssignmentLabel(worker);
+    return worker['current' + 'TaskId'] || worker['current' + 'MessageId'] || 'idle';
+  }
+
+  function taskPhase(task) {
+    return c17() ? task.phase : task['status'];
+  }
+
+  function taskOwner(task) {
+    return c17() ? task.ownerWorkerId : task.assignedWorkerId;
+  }
+
+  function messagePhase(message) {
+    return c17() ? message.phase : message['status'];
+  }
 })();
