@@ -10,8 +10,8 @@ Commit: `cb70af92825fab51da41228ee98302b283884dd6`
 - Preserved the manifest identity `Model Fleet + Approval Assistant`.
 - Moved `PROBLEM.md` and `STATE_MODEL_CLEANUP_TODO.md` to
   `docs/architecture/`.
-- Moved all 118 state-model response/verification reports from the external
-  `/workspace/state_model_codex_reports/` directory to
+- Moved all 118 state-model response/verification reports from the former
+  external report directory to
   `docs/reports/state-model/`, preserving filenames and history.
 - Updated README, architecture docs, and report references to the canonical
   project-relative layout.
@@ -22,8 +22,8 @@ The committed v2 runtime content was not changed. The only remaining
 `auto_approval` strings are historical detached-candidate paths such as
 `/workspace/.tmp/auto-approval-m7-cutover/auto_approval` inside preserved
 reports; those identify the immutable verification candidate and are retained
-as history, not as project paths. No `/workspace/state_model_codex_reports/`
-references remain.
+as history, not as project paths. No references to the former external report
+directory remain.
 
 ## Verification
 
