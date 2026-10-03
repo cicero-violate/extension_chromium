@@ -189,7 +189,10 @@
   }
 
   function isStreaming() {
-    return hasActiveStopControl() || hasActiveThinkingIndicator();
+    // ChatGPT's composer Stop control is the authoritative live-generation
+    // signal. The cadenced Thinking shimmer can survive an interrupted/dead
+    // response and must not keep an unowned post-restart worker falsely BUSY.
+    return hasActiveStopControl();
   }
 
   function turnLivenessNode(create = false) {

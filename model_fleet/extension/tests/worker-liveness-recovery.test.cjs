@@ -120,10 +120,14 @@ test('recovered response is bound after the latest matching user prompt', () => 
   assert.ok(workerSource.includes('function recoveredResponseBelongsToAssignment'));
 });
 
-test('Thinking shimmer counts as active ChatGPT response work', () => {
+test('Thinking shimmer is diagnostic only; Stop control is authoritative streaming evidence', () => {
   assert.ok(workerSource.includes('function hasActiveThinkingIndicator'));
   assert.ok(workerSource.includes('cadencedShimmer'));
-  assert.ok(workerSource.includes('hasActiveStopControl() || hasActiveThinkingIndicator()'));
+  const start = workerSource.indexOf('function isStreaming()');
+  const end = workerSource.indexOf('function turnLivenessNode', start);
+  const code = workerSource.slice(start, end);
+  assert.ok(code.includes('return hasActiveStopControl()'));
+  assert.ok(!code.includes('hasActiveThinkingIndicator()'));
 });
 
 test('bridge recovery carries immediate page busy proof', () => {
