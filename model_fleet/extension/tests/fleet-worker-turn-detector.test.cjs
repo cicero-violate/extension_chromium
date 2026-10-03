@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'fleet-worker.js'), 'utf8');
 
@@ -41,6 +42,25 @@ test('plain composer submit id is accepted only when it is not a Stop control', 
   const block = source.slice(start, end);
   assert.ok(block.includes("'#composer-submit-button'"));
   assert.ok(block.includes('!isStopControl(button)'));
+});
+
+test('Stop detection behavior rejects Stop controls and accepts Send controls', () => {
+  const start = source.indexOf('function isStopControl');
+  const end = source.indexOf('function hasActiveStopControl', start);
+  const sandbox = {};
+  vm.runInNewContext(source.slice(start, end) + '\nresult = isStopControl;', sandbox);
+  const isStopControl = sandbox.result;
+  const element = (testid, label, text = '') => ({
+    textContent: text,
+    getAttribute(name) {
+      if (name === 'data-testid') return testid;
+      if (name === 'aria-label') return label;
+      return '';
+    },
+  });
+  assert.equal(isStopControl(element('stop-button', 'Stop generating')), true);
+  assert.equal(isStopControl(element('', 'Stop')), true);
+  assert.equal(isStopControl(element('send-button', 'Send prompt')), false);
 });
 
 test('fleet worker composer adapter matches current ChatGPT textbox and ProseMirror contract', () => {

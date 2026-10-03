@@ -60,11 +60,14 @@ test('pre-send submission failure uses exactly one bounded fleet recovery cancel
 });
 
 test('background accepts dispatch only with explicit submission proof', () => {
-  assert.equal(background.split('response?.submissionProven !== true').length - 1, 2);
-  assert.equal(background.split('throw workerDispatchResponseError(response)').length - 1, 2);
+  assert.equal(background.split('response?.submissionProven !== true').length - 1, 1);
+  assert.equal(background.split('throw workerDispatchResponseError(response)').length - 1, 1);
   assert.equal(background.split('worker did not prove prompt submission').length - 1, 1);
   assert.ok(background.includes('const WORKER_DISPATCH_ACK_TIMEOUT_MS = 16 * 60 * 1000;'));
-  assert.equal(background.split("worker dispatch acknowledgement timeout')), WORKER_DISPATCH_ACK_TIMEOUT_MS").length - 1, 2);
+  assert.equal(background.split("worker dispatch acknowledgement timeout')), WORKER_DISPATCH_ACK_TIMEOUT_MS").length - 1, 1);
+  assert.equal(background.split('await sendAssignmentAndRequireSubmissionProof(dispatch.tabId, dispatch.assignment)').length - 1, 2);
+  assert.ok(background.includes('function ambiguousDispatchTransportError(error)'));
+  assert.ok(background.includes('uncertain.unsafeToRetry = true'));
 });
 
 test('there is no five-second fleet send-readiness timeout anymore', () => {

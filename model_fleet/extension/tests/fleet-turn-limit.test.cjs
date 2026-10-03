@@ -36,7 +36,9 @@ test('worker turn counters persist and normalize against the worker role limit',
 
 test('only an acknowledged assignment increments the chat turn count and each assignment counts once', () => {
   const dispatch = section('async function dispatchReserved', 'async function schedule');
-  assert.match(dispatch, /response\?\.submissionProven !== true/);
+  assert.match(dispatch, /await sendAssignmentAndRequireSubmissionProof\(dispatch\.tabId, dispatch\.assignment\)/);
+  const proof = section('async function sendAssignmentAndRequireSubmissionProof', 'function tabStateKey');
+  assert.match(proof, /response\?\.submissionProven !== true/);
   assert.match(dispatch, /worker\.lastCountedAssignmentId !== dispatch\.assignment\.id/);
   assert.match(dispatch, /worker\.lastCountedAssignmentId = dispatch\.assignment\.id/);
   assert.match(dispatch, /worker\.chatTurnCount = Math\.max[\s\S]*?\+ 1/);

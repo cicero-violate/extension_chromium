@@ -42,6 +42,8 @@
   let monitorWatchdogTimer = null;
   let monitorHardTimeoutTimer = null;
   let active = null;
+  let cancellationInFlight = null;
+  let cancellationPromise = null;
   let pendingCompletion = readCompletionHandoff();
   let latestAssistantNodeCache = null;
 
@@ -226,7 +228,7 @@
       element.getAttribute?.('aria-label') || '',
       element.textContent || '',
     ].join(' ');
-    return /stop/i.test(identity);
+    return /\bstop\b/i.test(identity);
   }
 
   function hasActiveStopControl() {
@@ -305,9 +307,19 @@
     return String(node?.innerText || node?.textContent || '').replace(/\s+/g, ' ').trim();
   }
 
+  function activeAssignmentIdForCustody() {
+    if (pendingCompletion?.assignmentId) return pendingCompletion.assignmentId;
+    if (active?.phase === 'running') return active.assignment.id;
+    if (cancellationInFlight?.phase === 'running') return cancellationInFlight.assignment.id;
+    return null;
+  }
+
   function sampleTurnLiveness() {
     const observedAt = Date.now();
-    const busy = !!active || !!pendingCompletion || isStreaming();
+    const busy = active?.phase === 'running'
+      || cancellationInFlight?.phase === 'running'
+      || !!pendingCompletion
+      || isStreaming();
     if (!busy) {
       const interrupted = hasActiveThinkingIndicator();
       turnLivenessNode(false)?.remove();
@@ -329,7 +341,7 @@
     const turnLastProgressAt = progressed
       ? observedAt
       : Math.max(turnBusySince, Number(previous.turnLastProgressAt) || turnBusySince);
-    const orphaned = !active && !pendingCompletion;
+    const orphaned = !active && !pendingCompletion && !cancellationInFlight;
     const stalledAfter = orphaned ? ORPHAN_TURN_STALLED_MS : OWNED_TURN_STALLED_MS;
     const deadAfter = orphaned ? ORPHAN_TURN_DEAD_MS : OWNED_TURN_DEAD_MS;
     const quietFor = Math.max(0, observedAt - turnLastProgressAt);
@@ -1156,18 +1168,38 @@
       if (active.assignment.id === assignment.id) {
         registered = true;
         startHeartbeat();
-        return { assignmentId: assignment.id, reattached: true, alreadyActive: true };
+        if (active.phase === 'preparing') {
+          return {
+            assignmentId: assignment.id,
+            reattached: false,
+            preparing: true,
+            submissionProven: false,
+            unsafeToRetry: true,
+            reason: 'assignment is still preparing and has no proven submitted user turn',
+          };
+        }
+        return {
+          assignmentId: assignment.id,
+          reattached: true,
+          alreadyActive: true,
+          submissionProven: active.phase === 'running',
+        };
       }
       throw new Error('worker already has assignment ' + active.assignment.id);
     }
 
     const streaming = isStreaming();
     const promptObserved = assignmentPromptObserved(assignment);
-    if (!streaming && !promptObserved) {
+    const reservedRecovery = assignment.phase === 'reserved';
+    if ((reservedRecovery && !promptObserved) || (!reservedRecovery && !streaming && !promptObserved)) {
       return {
         assignmentId: assignment.id,
         reattached: false,
-        reason: 'assignment prompt was not observed in the current ChatGPT conversation',
+        submissionProven: false,
+        unsafeToRetry: reservedRecovery,
+        reason: reservedRecovery
+          ? 'reserved assignment has no matching submitted user turn'
+          : 'assignment prompt was not observed in the current ChatGPT conversation',
       };
     }
 
@@ -1199,6 +1231,7 @@
       reattached: true,
       streaming,
       promptObserved,
+      submissionProven: reservedRecovery ? promptObserved : true,
     };
   }
 
@@ -1206,6 +1239,14 @@
     if (!assignment?.id || !assignment.prompt) throw new Error('invalid assignment');
     if (active) throw new Error(`worker already has assignment ${active.assignment.id}`);
     if (pendingCompletion) throw new Error(`worker is recovering completion ${pendingCompletion.assignmentId}`);
+    if (cancellationInFlight) {
+      if (cancellationInFlight.assignment.id === assignment.id) {
+        throw new Error('worker cancellation is still in flight for assignment ' + assignment.id);
+      }
+      clearAssignmentRecoveryHint(cancellationInFlight.assignment.id);
+      cancellationInFlight = null;
+      cancellationPromise = null;
+    }
 
     const acceptedAt = Date.now();
     active = {
@@ -1230,13 +1271,26 @@
   }
 
   async function cancelCurrent(reason = 'cancelled', expectedAssignmentId) {
-    if (!active) return expectedAssignmentId === undefined ? undefined : { ok: true, noOp: true, code: 'stale-no-active-assignment' };
+    if (!active) {
+      if (cancellationInFlight) {
+        const pendingId = cancellationInFlight.assignment.id;
+        if (expectedAssignmentId !== undefined && expectedAssignmentId !== pendingId) {
+          return { ok: false, noOp: true, code: 'assignment-ownership-mismatch', expectedAssignmentId, activeAssignmentId: pendingId };
+        }
+        if (cancellationPromise) return cancellationPromise;
+        active = cancellationInFlight;
+        cancellationInFlight = null;
+      } else {
+        return expectedAssignmentId === undefined ? undefined : { ok: true, noOp: true, code: 'stale-no-active-assignment' };
+      }
+    }
     if (expectedAssignmentId !== undefined && expectedAssignmentId !== active.assignment.id) {
       return { ok: false, noOp: true, code: 'assignment-ownership-mismatch', expectedAssignmentId, activeAssignmentId: active.assignment.id };
     }
+
     const cancelled = active;
     active = null;
-    clearAssignmentRecoveryHint(cancelled.assignment.id);
+    cancellationInFlight = cancelled;
     stopMonitor();
 
     const stopButton = document.querySelector(
@@ -1250,18 +1304,39 @@
     });
     if (stopButton && usable(stopButton) && enabledButton(stopButton)) stopButton.click();
 
-    try {
-      const response = await runtimeMessage({
-        type: 'fleet:assignment-cancelled',
-        assignmentId: cancelled.assignment.id,
-        reason,
-      });
-      signalIdleReady(cancelled.assignment.id);
-      return { ok: response?.ok !== false, assignmentId: cancelled.assignment.id, cancelled: true };
-    } catch {
-      // Keep the worker live if cancellation authority was not acknowledged.
-      return { ok: false, assignmentId: cancelled.assignment.id, cancelled: true };
-    }
+    const assignmentId = cancelled.assignment.id;
+    cancellationPromise = (async () => {
+      try {
+        const response = await runtimeMessage({
+          type: 'fleet:assignment-cancelled',
+          assignmentId,
+          reason,
+        });
+        const releasedLocally = response?.ok !== false
+          || response?.terminal === true
+          || response?.released === true
+          || response?.idempotent === true;
+        if (releasedLocally) {
+          if (cancellationInFlight?.assignment.id === assignmentId) cancellationInFlight = null;
+          clearAssignmentRecoveryHint(assignmentId);
+          signalIdleReady(assignmentId);
+        }
+        return {
+          ok: response?.ok !== false,
+          acknowledged: true,
+          releasedLocally,
+          assignmentId,
+          cancelled: true,
+          code: response?.code,
+          terminal: response?.terminal === true,
+        };
+      } catch {
+        return { ok: false, acknowledged: false, assignmentId, cancelled: true };
+      } finally {
+        cancellationPromise = null;
+      }
+    })();
+    return cancellationPromise;
   }
 
   function markRegistrationLost() {
@@ -1305,7 +1380,7 @@
       const response = await runtimeMessage({
         type: 'fleet:worker-heartbeat',
         ...liveness,
-        activeAssignmentId: active?.assignment.id || pendingCompletion?.assignmentId || null,
+        activeAssignmentId: activeAssignmentIdForCustody(),
         title: document.title,
         url: location.href,
       });
@@ -1334,7 +1409,7 @@
 
     if (message.type === 'fleet:bridge-ping') {
       const liveness = sampleTurnLiveness();
-      sendResponse({ ok: true, registered, registeredWorkerId, ...liveness, activeAssignmentId: active?.assignment.id || pendingCompletion?.assignmentId || null });
+      sendResponse({ ok: true, registered, registeredWorkerId, ...liveness, activeAssignmentId: activeAssignmentIdForCustody() });
       return false;
     }
 
@@ -1342,7 +1417,7 @@
       ensureRegistered(true)
         .then((ok) => {
           const liveness = sampleTurnLiveness();
-          sendResponse({ ok, registered, registeredWorkerId, ...liveness, activeAssignmentId: active?.assignment.id || pendingCompletion?.assignmentId || null });
+          sendResponse({ ok, registered, registeredWorkerId, ...liveness, activeAssignmentId: activeAssignmentIdForCustody() });
         })
         .catch((error) => sendResponse({ ok: false, registered: false, error: String(error) }));
       return true;
@@ -1413,7 +1488,8 @@
       const response = await runtimeMessage({
         type: 'fleet:worker-hello',
         ...liveness,
-        activeAssignmentId: active?.assignment.id || pendingCompletion?.assignmentId || readAssignmentRecoveryHint() || null,
+        activeAssignmentId: activeAssignmentIdForCustody(),
+        recoveryHintAssignmentId: readAssignmentRecoveryHint(),
       });
       const nextRegistered = response?.registered === true;
       const nextWorkerId = nextRegistered && response?.worker?.id ? String(response.worker.id) : null;

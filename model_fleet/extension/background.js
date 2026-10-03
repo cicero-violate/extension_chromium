@@ -167,7 +167,8 @@ function iso(ts = now()) {
 function workerDispatchResponseError(response) {
   const error = new Error(response?.error || 'worker did not prove prompt submission');
   const ambiguousPostSend = response?.unsafeToRetry === true
-    || response?.errorCode === SUBMISSION_UNPROVEN_AFTER_CLICK_CODE;
+    || response?.errorCode === SUBMISSION_UNPROVEN_AFTER_CLICK_CODE
+    || response?.ok === true;
   if (ambiguousPostSend) {
     error.code = SUBMISSION_UNPROVEN_AFTER_CLICK_CODE;
     error.unsafeToRetry = true;
@@ -177,6 +178,28 @@ function workerDispatchResponseError(response) {
 
 function ambiguousPostSendDispatchError(error) {
   return error?.unsafeToRetry === true || error?.code === SUBMISSION_UNPROVEN_AFTER_CLICK_CODE;
+}
+
+function ambiguousDispatchTransportError(error) {
+  if (ambiguousPostSendDispatchError(error)) return error;
+  const uncertain = new Error('worker dispatch transport outcome is unproven: ' + String(error));
+  uncertain.code = SUBMISSION_UNPROVEN_AFTER_CLICK_CODE;
+  uncertain.unsafeToRetry = true;
+  return uncertain;
+}
+
+async function sendAssignmentAndRequireSubmissionProof(tabId, assignment) {
+  let response;
+  try {
+    response = await Promise.race([
+      chrome.tabs.sendMessage(tabId, { type: 'fleet:execute-assignment', assignment }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('worker dispatch acknowledgement timeout')), WORKER_DISPATCH_ACK_TIMEOUT_MS)),
+    ]);
+  } catch (error) {
+    throw ambiguousDispatchTransportError(error);
+  }
+  if (!response?.ok || response?.submissionProven !== true) throw workerDispatchResponseError(response);
+  return response;
 }
 
 function tabStateKey(tabId) {
@@ -2696,14 +2719,7 @@ async function dispatchReserved(dispatch) {
     }
     await activateWorkerForDispatch(dispatch);
     await assertDispatchStillAuthorized(dispatch);
-    const response = await Promise.race([
-      chrome.tabs.sendMessage(dispatch.tabId, {
-        type: 'fleet:execute-assignment',
-        assignment: dispatch.assignment,
-      }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('worker dispatch acknowledgement timeout')), WORKER_DISPATCH_ACK_TIMEOUT_MS)),
-    ]);
-    if (!response?.ok || response?.submissionProven !== true) throw workerDispatchResponseError(response);
+    await sendAssignmentAndRequireSubmissionProof(dispatch.tabId, dispatch.assignment);
     await mutateFleet((state) => {
       const worker = state.workers[dispatch.workerId];
       if (worker?.currentAssignmentId === dispatch.assignment.id) {
@@ -4418,6 +4434,53 @@ function replaceC3State(target, candidate) {
   for (const key of Object.keys(target)) delete target[key];
   Object.assign(target, candidate);
 }
+
+function c3DispatchFromAssignment(workerId, tabId, assignment) {
+  return {
+    workerId,
+    tabId,
+    assignment: {
+      id: assignment.id,
+      kind: assignment.kind,
+      taskId: assignment.taskId ?? null,
+      messageIds: Array.isArray(assignment.messageIds) ? assignment.messageIds.slice() : [],
+      controlNoticeIds: Array.isArray(assignment.controlNoticeIds) ? assignment.controlNoticeIds.slice() : [],
+    },
+  };
+}
+
+function acceptProvenDispatchC3State(state, dispatch, acceptedAt) {
+  const c3 = globalThis.ModelFleetStateM7C3;
+  const authorization = c3.authorizeDispatch(state, dispatch);
+  if (!authorization.ok) throw new Error('M7 C3 stale acknowledgement: ' + authorization.reason);
+  let next = c3.acceptDispatch(state, { workerId: dispatch.workerId, assignmentId: dispatch.assignment.id, acceptedAt });
+  const worker = next.workers[dispatch.workerId];
+  worker.lastDispatchError = '';
+  worker.dispatchFailureCount = 0;
+  worker.lastDispatchFailureAt = 0;
+  if (worker.lastCountedAssignmentId !== dispatch.assignment.id) {
+    worker.lastCountedAssignmentId = dispatch.assignment.id;
+    worker.chatTurnCount = Math.max(0, Math.trunc(Number(worker.chatTurnCount || 0))) + 1;
+    const limit = maxTurnsPerChatForRole(next.topology, worker.role);
+    if (worker.chatTurnCount >= limit) {
+      worker['chat' + 'RotationPending'] = true;
+      next = c3.appendJournal(next, 'worker.chat_limit_reached', dispatch.workerId + ' reached ' + worker.chatTurnCount + '/' + limit + ' turns', { assignmentId: dispatch.assignment.id, turns: worker.chatTurnCount, limit }, acceptedAt);
+    }
+  }
+  next = c3.appendJournal(next, 'dispatch.accepted', dispatch.assignment.id + ' accepted by ' + dispatch.workerId, { workerId: dispatch.workerId, tabId: dispatch.tabId }, acceptedAt);
+  if (dispatch.assignment.kind === 'message') {
+    const ids = dispatch.assignment.messageIds || [];
+    const text = ids.length > 1
+      ? ids.length + ' messages (' + ids[0] + '…' + ids[ids.length - 1] + ') sent to ' + dispatch.workerId
+      : ids[0] + ' sent to ' + dispatch.workerId;
+    next = c3.appendJournal(next, ids.length > 1 ? 'message.batch_sent' : 'message.sent', text, { assignmentId: dispatch.assignment.id, messageIds: ids, count: ids.length }, acceptedAt);
+  } else if (dispatch.assignment.kind === 'task') {
+    next = c3.appendJournal(next, 'task.started', dispatch.assignment.taskId + ' started by ' + dispatch.workerId, { assignmentId: dispatch.assignment.id }, acceptedAt);
+  } else {
+    next = c3.appendJournal(next, 'control.started', (dispatch.assignment.controlNoticeIds?.length || 0) + ' control notice(s) started by ' + dispatch.workerId, { assignmentId: dispatch.assignment.id, controlNoticeIds: dispatch.assignment.controlNoticeIds || [] }, acceptedAt);
+  }
+  return next;
+}
 async function dispatchReservedC3Candidate(dispatch) {
   const c3 = globalThis.ModelFleetStateM7C3;
   const attemptedAt = now();
@@ -4465,40 +4528,10 @@ async function dispatchReservedC3Candidate(dispatch) {
     const sendState = await loadFleetState();
     const sendAuthorization = c3.authorizeDispatch(sendState, dispatch);
     if (!sendAuthorization.ok) throw new Error(`M7 C3 stale-before-send: ${sendAuthorization.reason}`);
-    const response = await Promise.race([
-      chrome.tabs.sendMessage(dispatch.tabId, { type: 'fleet:execute-assignment', assignment: dispatch.assignment }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('worker dispatch acknowledgement timeout')), WORKER_DISPATCH_ACK_TIMEOUT_MS)),
-    ]);
-    if (!response?.ok || response?.submissionProven !== true) throw workerDispatchResponseError(response);
+    await sendAssignmentAndRequireSubmissionProof(dispatch.tabId, dispatch.assignment);
     const acceptedAt = now();
     await mutateFleet((state) => {
-      const authorization = c3.authorizeDispatch(state, dispatch);
-      if (!authorization.ok) throw new Error(`M7 C3 stale acknowledgement: ${authorization.reason}`);
-      let next = c3.acceptDispatch(state, { workerId: dispatch.workerId, assignmentId: dispatch.assignment.id, acceptedAt });
-      const worker = next.workers[dispatch.workerId];
-      worker.lastDispatchError = '';
-      worker.dispatchFailureCount = 0;
-      worker.lastDispatchFailureAt = 0;
-      if (worker.lastCountedAssignmentId !== dispatch.assignment.id) {
-        worker.lastCountedAssignmentId = dispatch.assignment.id;
-        worker.chatTurnCount = Math.max(0, Math.trunc(Number(worker.chatTurnCount || 0))) + 1;
-        const limit = maxTurnsPerChatForRole(next.topology, worker.role);
-        if (worker.chatTurnCount >= limit) {
-          worker['chat' + 'RotationPending'] = true;
-          next = c3.appendJournal(next, 'worker.chat_limit_reached', `${dispatch.workerId} reached ${worker.chatTurnCount}/${limit} turns`, { assignmentId: dispatch.assignment.id, turns: worker.chatTurnCount, limit }, acceptedAt);
-        }
-      }
-      next = c3.appendJournal(next, 'dispatch.accepted', `${dispatch.assignment.id} accepted by ${dispatch.workerId}`, { workerId: dispatch.workerId, tabId: dispatch.tabId }, acceptedAt);
-      if (dispatch.assignment.kind === 'message') {
-        const ids = dispatch.assignment.messageIds || [];
-        const text = ids.length > 1 ? `${ids.length} messages (${ids[0]}…${ids[ids.length - 1]}) sent to ${dispatch.workerId}` : `${ids[0]} sent to ${dispatch.workerId}`;
-        next = c3.appendJournal(next, ids.length > 1 ? 'message.batch_sent' : 'message.sent', text, { assignmentId: dispatch.assignment.id, messageIds: ids, count: ids.length }, acceptedAt);
-      } else if (dispatch.assignment.kind === 'task') {
-        next = c3.appendJournal(next, 'task.started', `${dispatch.assignment.taskId} started by ${dispatch.workerId}`, { assignmentId: dispatch.assignment.id }, acceptedAt);
-      } else {
-        next = c3.appendJournal(next, 'control.started', `${dispatch.assignment.controlNoticeIds?.length || 0} control notice(s) started by ${dispatch.workerId}`, { assignmentId: dispatch.assignment.id, controlNoticeIds: dispatch.assignment.controlNoticeIds || [] }, acceptedAt);
-      }
-      replaceC3State(state, next);
+      replaceC3State(state, acceptProvenDispatchC3State(state, dispatch, acceptedAt));
     });
   } catch (error) {
     const failureAt = now();
@@ -4927,13 +4960,43 @@ recoverRegisteredWorkerBridge = async function recoverRegisteredWorkerBridgeC4(w
       response = await chrome.tabs.sendMessage(worker.tabId, { type: 'fleet:recover-assignment', assignment: { ...assignmentRecord, prompt } });
     }
     const observedAt = now();
+
+    if (assignmentRecord?.phase === 'reserved' && response.submissionProven !== true) {
+      const reason = AUTO_RECOVERY_REASON_PREFIX + AMBIGUOUS_POST_SEND_RECOVERY_PREFIX
+        + ' bridge recovery found no proven submitted user turn';
+      const blocked = await mutateFleet((state) => c6ApplyCancellationInState(
+        state,
+        workerId,
+        assignmentRecord.id,
+        reason,
+        observedAt,
+        worker.tabId,
+      ));
+      await setFleetRecoveryHint(worker.tabId, null).catch(() => {});
+      schedule().catch(() => {});
+      return {
+        workerId,
+        recovered: false,
+        blocked: blocked.result?.outcome === 'submission-uncertain-blocked',
+        assignmentId: assignmentRecord.id,
+        recovery: blocked.result,
+      };
+    }
+
     const result = await mutateFleet((state) => {
+      let recoveryState = state;
+      if (assignmentRecord?.phase === 'reserved' && response.submissionProven === true) {
+        const recoveryDispatch = c3DispatchFromAssignment(workerId, worker.tabId, assignmentRecord);
+        recoveryState = acceptProvenDispatchC3State(state, recoveryDispatch, observedAt);
+      }
       const recoveryInput = {
         workerId,
         observedAt,
         hasAssignmentIdentity: !!assignmentRecord,
         reattached: response.reattached === true,
-        promptProof: response.alreadyActive === true || response.streaming === true || response.promptObserved === true,
+        promptProof: response.submissionProven === true
+          || (assignmentRecord?.phase !== 'reserved'
+            && (response.alreadyActive === true || response.streaming === true || response.promptObserved === true)),
         pendingCompletionProof: response.recoveringCompletion === true,
         unrecoverable: response.ok !== true || response.unrecoverable === true,
       };
@@ -4942,7 +5005,7 @@ recoverRegisteredWorkerBridge = async function recoverRegisteredWorkerBridgeC4(w
       for (const key of ['turnHealth', 'turnBusySince', 'turnLastProgressAt', 'turnStalledSince', 'turnInterruptionKey']) {
         if (response[key] !== undefined) recoveryInput[key] = response[key];
       }
-      const outcome = globalThis.ModelFleetStateM7C4.reconcileRecoveryCustody(state, recoveryInput);
+      const outcome = globalThis.ModelFleetStateM7C4.reconcileRecoveryCustody(recoveryState, recoveryInput);
       let next = outcome.state;
       if (outcome.result.ok === true && ['reattached-running', 'reattached', 'completion-reattached', 'no-owner'].includes(outcome.result.outcome)) {
         const cleared = globalThis.ModelFleetStateM7C4.clearFaultWithEvidence(next, workerId, {

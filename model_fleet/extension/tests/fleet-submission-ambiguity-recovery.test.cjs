@@ -130,3 +130,53 @@ test('typed post-click ambiguity survives a failed cancellation RPC and cannot f
   assert.ok(legacy.includes("terminalStatus: 'blocked'"));
   assert.ok(legacy.includes('requeue: false'));
 });
+
+
+test('transport acknowledgement loss is classified unsafe to retry because worker outcome is unknown', () => {
+  const start = background.indexOf('async function sendAssignmentAndRequireSubmissionProof');
+  const end = background.indexOf('function tabStateKey', start);
+  const body = background.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.match(body, /catch \(error\)/);
+  assert.match(body, /throw ambiguousDispatchTransportError\(error\)/);
+  assert.match(background, /uncertain\.code = SUBMISSION_UNPROVEN_AFTER_CLICK_CODE/);
+  assert.match(background, /uncertain\.unsafeToRetry = true/);
+});
+
+test('positive worker response without submission proof is also ambiguous, not retryable', () => {
+  const start = background.indexOf('function workerDispatchResponseError');
+  const end = background.indexOf('function ambiguousPostSendDispatchError', start);
+  const body = background.slice(start, end);
+  assert.match(body, /response\?\.ok === true/);
+  assert.match(body, /error\.unsafeToRetry = true/);
+});
+
+
+test('cancellation keeps running custody represented until background acknowledgement', () => {
+  const custodyStart = worker.indexOf('function activeAssignmentIdForCustody');
+  const custodyEnd = worker.indexOf('function sampleTurnLiveness', custodyStart);
+  const custody = worker.slice(custodyStart, custodyEnd);
+  assert.match(custody, /cancellationInFlight\?\.phase === 'running'/);
+
+  const cancelStart = worker.indexOf('async function cancelCurrent');
+  const cancelEnd = worker.indexOf('function markRegistrationLost', cancelStart);
+  const cancel = worker.slice(cancelStart, cancelEnd);
+  const hold = cancel.indexOf('cancellationInFlight = cancelled');
+  const rpc = cancel.indexOf("type: 'fleet:assignment-cancelled'");
+  const release = cancel.indexOf('cancellationInFlight = null', rpc);
+  const idle = cancel.indexOf('signalIdleReady(assignmentId)', rpc);
+  assert.ok(hold >= 0 && rpc > hold);
+  assert.ok(release > rpc);
+  assert.ok(idle > rpc);
+  assert.match(cancel, /acknowledged: false/);
+  assert.match(cancel, /if \(cancellationPromise\) return cancellationPromise/);
+  assert.match(cancel, /active = cancellationInFlight/);
+});
+
+test('unacknowledged cancellation is not classified as orphan idle liveness', () => {
+  const start = worker.indexOf('function sampleTurnLiveness');
+  const end = worker.indexOf('function findComposer', start);
+  const body = worker.slice(start, end);
+  assert.match(body, /cancellationInFlight\?\.phase === 'running'/);
+  assert.match(body, /!active && !pendingCompletion && !cancellationInFlight/);
+});

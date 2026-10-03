@@ -68,22 +68,49 @@ test('unprovable assignment recovery is requeued rather than treated as complete
   assert.doesNotMatch(release, /status: 'done'/);
 });
 
-test('worker hello advertises recovery hint so background does not drop in-flight custody during reinjection', () => {
+test('worker hello separates recovery hint from proven active assignment custody', () => {
   const body = section(worker, 'async function hello()', "window.addEventListener('pagehide'");
-  assert.match(body, /readAssignmentRecoveryHint\(\)/);
-  assert.match(body, /activeAssignmentId/);
+  assert.match(body, /activeAssignmentId: activeAssignmentIdForCustody\(\)/);
+  assert.match(body, /recoveryHintAssignmentId: readAssignmentRecoveryHint\(\)/);
+  assert.doesNotMatch(body, /activeAssignmentId: .*readAssignmentRecoveryHint/);
 });
 
-test('worker reattaches only when the current page proves the fleet turn', () => {
+test('worker reattaches reserved custody only with prompt proof and never treats preparing as proven', () => {
   const body = section(worker, 'async function recoverAssignment', 'async function executeAssignment');
+  assert.match(body, /active\.phase === 'preparing'/);
+  assert.match(body, /preparing: true/);
+  assert.match(body, /submissionProven: false/);
+  assert.match(body, /unsafeToRetry: true/);
   assert.match(body, /const streaming = isStreaming\(\)/);
   assert.match(body, /const promptObserved = assignmentPromptObserved\(assignment\)/);
-  assert.match(body, /if \(!streaming && !promptObserved\)/);
-  assert.match(body, /reattached: false/);
+  assert.match(body, /const reservedRecovery = assignment\.phase === 'reserved'/);
+  assert.match(body, /reservedRecovery && !promptObserved/);
+  assert.match(body, /submissionProven: reservedRecovery \? promptObserved : true/);
   assert.match(body, /active = \{/);
   assert.match(body, /phase: 'running'/);
   assert.match(body, /startMonitor\(\)/);
-  assert.match(body, /reattached: true/);
+});
+
+test('v2 bridge recovery blocks unproven reserved custody and accepts proven custody through C3 before C4', () => {
+  const start = background.indexOf('recoverRegisteredWorkerBridge = async function recoverRegisteredWorkerBridgeC4');
+  const end = background.indexOf('// C5 v2 completion overlay', start);
+  assert.ok(start >= 0 && end > start);
+  const body = background.slice(start, end);
+  assert.match(body, /assignmentRecord\?\.phase === 'reserved' && response\.submissionProven !== true/);
+  assert.match(body, /AMBIGUOUS_POST_SEND_RECOVERY_PREFIX/);
+  assert.match(body, /c6ApplyCancellationInState/);
+  assert.match(body, /assignmentRecord\?\.phase === 'reserved' && response\.submissionProven === true/);
+  assert.match(body, /c3DispatchFromAssignment/);
+  assert.match(body, /acceptProvenDispatchC3State/);
+  assert.match(body, /reconcileRecoveryCustody\(recoveryState, recoveryInput\)/);
+});
+
+test('preparing worker liveness never advertises accepted assignment custody', () => {
+  const helper = section(worker, 'function activeAssignmentIdForCustody', 'function sampleTurnLiveness');
+  assert.match(helper, /active\?\.phase === 'running'/);
+  assert.doesNotMatch(helper, /phase === 'preparing'/);
+  const liveness = section(worker, 'function sampleTurnLiveness', 'function findComposer');
+  assert.match(liveness, /active\?\.phase === 'running'/);
 });
 
 test('worker prompt proof checks the latest user turn against the assignment prompt', () => {
@@ -107,7 +134,7 @@ test('recovered assignment hints are cleared on recovery completion and cancella
   const finish = section(worker, 'async function finishActive', 'async function monitorActive');
   assert.match(finish, /clearAssignmentRecoveryHint\(completed\.assignment\.id\)/);
   const cancel = section(worker, 'async function cancelCurrent', 'async function heartbeat');
-  assert.match(cancel, /clearAssignmentRecoveryHint\(cancelled\.assignment\.id\)/);
+  assert.match(cancel, /if \(releasedLocally\)[\s\S]*clearAssignmentRecoveryHint\(assignmentId\)/);
 });
 
 
@@ -118,4 +145,21 @@ test('scheduler cannot reserve fresh work while bridge recovery owns custody', (
   const scheduler = section(background, 'async function schedule()', 'async function scheduleMessageUntilAdmitted');
   assert.match(scheduler, /if \(fleetBridgeRecoveryPromise\)/);
   assert.match(scheduler, /schedulePending = true/);
+});
+
+
+test('bridge and registration responses never expose preparing as active assignment custody', () => {
+  const ping = section(worker, "if (message.type === 'fleet:bridge-ping')", "if (message.type === 'fleet:ensure-registration')");
+  assert.match(ping, /activeAssignmentId: activeAssignmentIdForCustody\(\)/);
+  assert.doesNotMatch(ping, /active\?\.assignment\.id/);
+
+  const registration = section(worker, "if (message.type === 'fleet:ensure-registration')", "if (message.type === 'fleet:execute-assignment')");
+  assert.match(registration, /activeAssignmentId: activeAssignmentIdForCustody\(\)/);
+  assert.doesNotMatch(registration, /active\?\.assignment\.id/);
+});
+
+test('legacy hello reconciliation treats recovery hint as metadata, not live custody authority', () => {
+  const body = section(background, 'async function reconcileOnHello', 'async function updateWorkerHeartbeat');
+  assert.match(body, /const liveAssignmentId = payload\.activeAssignmentId \|\| null/);
+  assert.doesNotMatch(body, /recoveryHintAssignmentId/);
 });
