@@ -4656,7 +4656,7 @@ function c4HeartbeatObservation(workerId, heartbeat) {
     hasAssignmentIdentity,
   };
   if (hasAssignmentIdentity) observation.reportedAssignmentId = heartbeat.activeAssignmentId;
-  for (const key of ['title', 'url', 'windowId', 'turnHealth', 'turnBusySince', 'turnLastProgressAt', 'turnStalledSince']) if (Object.prototype.hasOwnProperty.call(heartbeat, key)) observation[key] = heartbeat[key];
+  for (const key of ['title', 'url', 'windowId', 'turnHealth', 'turnBusySince', 'turnLastProgressAt', 'turnStalledSince', 'turnInterruptionKey']) if (Object.prototype.hasOwnProperty.call(heartbeat, key)) observation[key] = heartbeat[key];
   return observation;
 }
 flushWorkerHeartbeats = async function flushWorkerHeartbeatsC4() {
@@ -4694,20 +4694,24 @@ flushWorkerHeartbeats = async function flushWorkerHeartbeatsC4() {
           && after?.runtime.busy === false
           && before.currentAssignmentId == null
           && after.currentAssignmentId == null;
-        const unownedTurnInterrupted = beforeTurnHealth !== 'interrupted'
-          && afterTurnHealth === 'interrupted'
+        const interruptionKey = String(after?.runtime?.turnInterruptionKey || '');
+        const handledInterruptionKey = String(after?.runtime?.turnInterruptionHandledKey || '');
+        const unownedTurnInterrupted = afterTurnHealth === 'interrupted'
           && after?.runtime.busy === false
           && before.currentAssignmentId == null
-          && after.currentAssignmentId == null;
+          && after.currentAssignmentId == null
+          && interruptionKey
+          && interruptionKey !== handledInterruptionKey;
         if (unownedTurnQuiesced || unownedTurnInterrupted) {
           next.lastGoalContinuationKey = '';
+          if (unownedTurnInterrupted) next.workers[workerId].runtime.turnInterruptionHandledKey = interruptionKey;
           next = globalThis.ModelFleetStateM7C3.appendJournal(
             next,
             unownedTurnInterrupted ? 'worker.unowned_turn_interrupted' : 'worker.unowned_turn_quiesced',
             unownedTurnInterrupted
               ? `${workerId} ChatGPT turn ended without a live Stop control; Coordinator reconciliation re-armed`
               : `${workerId} unowned ChatGPT turn became idle; goal continuation dedupe reset`,
-            { workerId, turnHealth: afterTurnHealth },
+            { workerId, turnHealth: afterTurnHealth, interruptionKey: unownedTurnInterrupted ? interruptionKey : '' },
             heartbeat.at,
           );
         }
@@ -4750,7 +4754,7 @@ updateWorkerHeartbeat = async function updateWorkerHeartbeatC4(tab, payload) {
     url: tab.url || '',
     windowId: Number.isInteger(tab.windowId) ? tab.windowId : null,
   });
-  for (const key of ['turnHealth', 'turnBusySince', 'turnLastProgressAt', 'turnStalledSince']) {
+  for (const key of ['turnHealth', 'turnBusySince', 'turnLastProgressAt', 'turnStalledSince', 'turnInterruptionKey']) {
     if (Object.prototype.hasOwnProperty.call(payload, key)) liveHeartbeats.get(workerId)[key] = payload[key];
   }
   if (Object.prototype.hasOwnProperty.call(payload, 'activeAssignmentId')) {
@@ -4763,12 +4767,24 @@ updateWorkerHeartbeat = async function updateWorkerHeartbeatC4(tab, payload) {
   return { observedAt, registered: true };
 };
 reconcileOnHello = async function reconcileOnHelloC4(tab, payload = {}) {
-  const loaded = await loadFleetState();
+  const observedAt = now();
+  const repairProbe = typeof c18Module === 'function'
+    ? await c18Module().probeV2WorkerBindingForTab(chrome.storage.local, tab.id)
+    : null;
+  const repairEvidence = repairProbe ? {
+    ...repairProbe,
+    observedAt,
+    hasAssignmentIdentity: Object.prototype.hasOwnProperty.call(payload, 'activeAssignmentId'),
+    reportedAssignmentId: Object.prototype.hasOwnProperty.call(payload, 'activeAssignmentId')
+      ? ((typeof payload.activeAssignmentId === 'string' ? payload.activeAssignmentId.trim() : '') || null)
+      : undefined,
+  } : null;
+  const loaded = await loadFleetState(repairEvidence ? { repairEvidence } : undefined);
   if (loaded.version !== 2) return reconcileOnHelloC3Legacy(tab, payload);
   const workerId = workerIdForTabInState(loaded, tab.id);
   if (!workerId) return { registered: false, worker: null };
   const hasAssignmentIdentity = Object.prototype.hasOwnProperty.call(payload, 'activeAssignmentId');
-  const observedAt = now();
+  let scheduleAfterRecovery = false;
   const committed = await mutateFleet((state) => {
     const recoveryInput = {
       workerId,
@@ -4780,7 +4796,7 @@ reconcileOnHello = async function reconcileOnHelloC4(tab, payload = {}) {
     };
     if (hasAssignmentIdentity) recoveryInput.reportedAssignmentId = (typeof payload.activeAssignmentId === 'string' ? payload.activeAssignmentId.trim() : '') || null;
     if (Object.prototype.hasOwnProperty.call(payload, 'busy')) recoveryInput.busy = payload.busy;
-    for (const key of ['turnHealth', 'turnBusySince', 'turnLastProgressAt', 'turnStalledSince']) {
+    for (const key of ['turnHealth', 'turnBusySince', 'turnLastProgressAt', 'turnStalledSince', 'turnInterruptionKey']) {
       if (Object.prototype.hasOwnProperty.call(payload, key)) recoveryInput[key] = payload[key];
     }
     const result = globalThis.ModelFleetStateM7C4.reconcileRecoveryCustody(state, recoveryInput);
@@ -4796,6 +4812,20 @@ reconcileOnHello = async function reconcileOnHelloC4(tab, payload = {}) {
       });
       scheduleAfterRecovery = cleared.result.cleared === true;
       next = cleared.state;
+    }
+    const interruptionKey = String(next.workers[workerId]?.runtime?.turnInterruptionKey || '');
+    const handledInterruptionKey = String(next.workers[workerId]?.runtime?.turnInterruptionHandledKey || '');
+    const interruptedNoOwner = result.result.ok === true
+      && result.result.outcome === 'no-owner'
+      && payload.busy === false
+      && payload.turnHealth === 'interrupted'
+      && interruptionKey
+      && interruptionKey !== handledInterruptionKey;
+    if (interruptedNoOwner) {
+      next.lastGoalContinuationKey = '';
+      next.workers[workerId].runtime.turnInterruptionHandledKey = interruptionKey;
+      next = globalThis.ModelFleetStateM7C3.appendJournal(next, 'worker.unowned_turn_interrupted', `${workerId} hello observed an interrupted unowned ChatGPT turn; Coordinator reconciliation re-armed`, { workerId, turnHealth: 'interrupted', interruptionKey }, observedAt);
+      scheduleAfterRecovery = true;
     }
     const worker = next.workers[workerId];
     worker.title = tab.title || worker.title;
@@ -4831,6 +4861,7 @@ recoverRegisteredWorkerBridge = async function recoverRegisteredWorkerBridgeC4(w
       turnBusySince: bridge?.turnBusySince,
       turnLastProgressAt: bridge?.turnLastProgressAt,
       turnStalledSince: bridge?.turnStalledSince,
+      turnInterruptionKey: bridge?.turnInterruptionKey,
     };
     if (assignmentRecord) {
       let prompt = '';
@@ -4852,7 +4883,7 @@ recoverRegisteredWorkerBridge = async function recoverRegisteredWorkerBridgeC4(w
       };
       if (assignmentRecord) recoveryInput.reportedAssignmentId = typeof response.assignmentId === 'string' ? response.assignmentId : null;
       if (Object.prototype.hasOwnProperty.call(response, 'busy')) recoveryInput.busy = response.busy;
-      for (const key of ['turnHealth', 'turnBusySince', 'turnLastProgressAt', 'turnStalledSince']) {
+      for (const key of ['turnHealth', 'turnBusySince', 'turnLastProgressAt', 'turnStalledSince', 'turnInterruptionKey']) {
         if (response[key] !== undefined) recoveryInput[key] = response[key];
       }
       const outcome = globalThis.ModelFleetStateM7C4.reconcileRecoveryCustody(state, recoveryInput);
@@ -4868,14 +4899,18 @@ recoverRegisteredWorkerBridge = async function recoverRegisteredWorkerBridgeC4(w
         });
         next = cleared.state;
       }
+      const interruptionKey = String(next.workers[workerId]?.runtime?.turnInterruptionKey || '');
+      const handledInterruptionKey = String(next.workers[workerId]?.runtime?.turnInterruptionHandledKey || '');
       const interruptedNoOwner = outcome.result.ok === true
         && outcome.result.outcome === 'no-owner'
         && response.busy === false
         && response.turnHealth === 'interrupted'
-        && beforeTurnHealth !== 'interrupted';
+        && interruptionKey
+        && interruptionKey !== handledInterruptionKey;
       if (interruptedNoOwner) {
         next.lastGoalContinuationKey = '';
-        next = globalThis.ModelFleetStateM7C3.appendJournal(next, 'worker.unowned_turn_interrupted', `${workerId} bridge recovered an interrupted unowned ChatGPT turn; Coordinator reconciliation re-armed`, { workerId, turnHealth: 'interrupted' }, observedAt);
+        next.workers[workerId].runtime.turnInterruptionHandledKey = interruptionKey;
+        next = globalThis.ModelFleetStateM7C3.appendJournal(next, 'worker.unowned_turn_interrupted', `${workerId} bridge recovered an interrupted unowned ChatGPT turn; Coordinator reconciliation re-armed`, { workerId, turnHealth: 'interrupted', interruptionKey }, observedAt);
         scheduleAfterBridgeRecovery = true;
       }
       next = globalThis.ModelFleetStateM7C3.appendJournal(next, 'worker.bridge_recovered', `${workerId} bridge recovery reconciled`, { assignmentId: assignmentRecord?.id || null, outcome: outcome.result.outcome || outcome.result.code || null }, observedAt);

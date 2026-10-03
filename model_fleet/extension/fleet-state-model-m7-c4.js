@@ -57,6 +57,8 @@
     }
     if (observation.busy === false && own(observation, 'turnHealth') && !['idle', 'interrupted'].includes(observation.turnHealth)) throw reject('idle-heartbeat-nonidle-turn-health');
     if (['stalled', 'dead'].includes(observation.turnHealth) && observation.busy !== true) throw reject('turn-health-requires-busy');
+    if (own(observation, 'turnInterruptionKey')
+      && (typeof observation.turnInterruptionKey !== 'string' || observation.turnInterruptionKey.length > 128)) throw reject('invalid-heartbeat-turn-interruption-key');
   }
   function observationMetadata(next, worker, observation) {
     if (own(observation, 'title') && observation.title !== '') next.title = observation.title;
@@ -116,6 +118,7 @@
       && (!own(observation, 'turnBusySince') || observation.turnBusySince === Number(previous.turnBusySince || 0))
       && (!own(observation, 'turnLastProgressAt') || observation.turnLastProgressAt === Number(previous.turnLastProgressAt || 0))
       && (!own(observation, 'turnStalledSince') || observation.turnStalledSince === Number(previous.turnStalledSince || 0))
+      && (!own(observation, 'turnInterruptionKey') || observation.turnInterruptionKey === String(previous.turnInterruptionKey || ''))
       && (!own(metadata, 'title') || metadata.title === worker.title) && (!own(metadata, 'url') || metadata.url === worker.url) && (!own(metadata, 'windowId') || metadata.windowId === worker.windowId);
     if (observation.observedAt === previous.lastHeartbeatAt && !same) throw reject('conflicting-same-time-observation');
     const record = assignment(source, observation.workerId).assignment;
@@ -128,6 +131,8 @@
     target.runtime.turnBusySince = own(observation, 'turnBusySince') ? observation.turnBusySince : (observation.busy ? Number(previous.turnBusySince || observation.observedAt) : 0);
     target.runtime.turnLastProgressAt = own(observation, 'turnLastProgressAt') ? observation.turnLastProgressAt : (observation.busy ? Number(previous.turnLastProgressAt || observation.observedAt) : 0);
     target.runtime.turnStalledSince = own(observation, 'turnStalledSince') ? observation.turnStalledSince : 0;
+    if (own(observation, 'turnInterruptionKey')) target.runtime.turnInterruptionKey = observation.turnInterruptionKey;
+    if (observation.busy === true && previous.busy === false) target.runtime.turnInterruptionHandledKey = '';
     if (observation.busy === false) {
       target.runtime.turnRecoveryAttempts = 0;
       target.runtime.turnRecoveryAt = 0;
@@ -182,6 +187,8 @@
     if (own(input, 'turnBusySince')) next.workers[input.workerId].runtime.turnBusySince = input.turnBusySince;
     if (own(input, 'turnLastProgressAt')) next.workers[input.workerId].runtime.turnLastProgressAt = input.turnLastProgressAt;
     if (own(input, 'turnStalledSince')) next.workers[input.workerId].runtime.turnStalledSince = input.turnStalledSince;
+    if (own(input, 'turnInterruptionKey')) next.workers[input.workerId].runtime.turnInterruptionKey = input.turnInterruptionKey;
+    if (input.busy === true && source.workers[input.workerId].runtime.busy === false) next.workers[input.workerId].runtime.turnInterruptionHandledKey = '';
     if (input.busy === false) {
       next.workers[input.workerId].runtime.turnRecoveryAttempts = 0;
       next.workers[input.workerId].runtime.turnRecoveryAt = 0;

@@ -217,12 +217,16 @@ test('historical Thinking shimmer is excluded from current-turn interruption evi
   assert.ok(workerSource.includes('const thinkingNodes = currentThinkingNodes()'));
 });
 
-test('interrupted orphan turn re-arms Coordinator reconciliation exactly on transition', () => {
-  assert.ok(background.includes("const unownedTurnInterrupted = beforeTurnHealth !== 'interrupted'"));
-  assert.ok(background.includes("afterTurnHealth === 'interrupted'"));
+test('interrupted orphan turn re-arms Coordinator reconciliation exactly once per interruption fingerprint', () => {
+  assert.ok(workerSource.includes("turnInterruptionKey: interrupted ? fingerprint(latestTurnProgressText()) : ''"));
+  assert.ok(background.includes("const interruptionKey = String(after?.runtime?.turnInterruptionKey || '')"));
+  assert.ok(background.includes("const handledInterruptionKey = String(after?.runtime?.turnInterruptionHandledKey || '')"));
+  assert.ok(background.includes('interruptionKey !== handledInterruptionKey'));
+  assert.ok(background.includes('runtime.turnInterruptionHandledKey = interruptionKey'));
   assert.ok(background.includes("'worker.unowned_turn_interrupted'"));
   assert.ok(background.includes("next.lastGoalContinuationKey = ''"));
   assert.ok(background.includes('scheduleAfterBridgeRecovery = true'));
+  assert.ok(background.includes("hello observed an interrupted unowned ChatGPT turn; Coordinator reconciliation re-armed"));
 });
 
 test('INTERRUPTED is projected into the worker status pill', () => {
@@ -230,4 +234,14 @@ test('INTERRUPTED is projected into the worker status pill', () => {
   const pane = fs.readFileSync(path.join(extensionDir, 'control-pane.js'), 'utf8');
   assert.ok(c16.includes("worker.turnHealth === 'interrupted'"));
   assert.ok(pane.includes("turnHealth === 'interrupted' ? 'interrupted'"));
+});
+
+
+test('interruption fingerprint is typed and persisted across heartbeat and recovery custody', () => {
+  const c1 = fs.readFileSync(path.join(extensionDir, 'fleet-state-model-m7-c1.js'), 'utf8');
+  const c4 = fs.readFileSync(path.join(extensionDir, 'fleet-state-model-m7-c4.js'), 'utf8');
+  assert.ok(c1.includes("['turnInterruptionKey', 'turnInterruptionHandledKey']"));
+  assert.ok(c4.includes("own(observation, 'turnInterruptionKey')"));
+  assert.ok(c4.includes('target.runtime.turnInterruptionKey = observation.turnInterruptionKey'));
+  assert.ok(c4.includes('next.workers[input.workerId].runtime.turnInterruptionKey = input.turnInterruptionKey'));
 });

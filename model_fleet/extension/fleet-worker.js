@@ -260,6 +260,7 @@
         turnBusySince: 0,
         turnLastProgressAt: 0,
         turnStalledSince: 0,
+        turnInterruptionKey: interrupted ? fingerprint(latestTurnProgressText()) : '',
       };
     }
 

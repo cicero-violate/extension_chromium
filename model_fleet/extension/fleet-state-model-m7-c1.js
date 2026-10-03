@@ -225,6 +225,12 @@
       && (!Number.isInteger(worker.runtime.turnRecoveryAttempts) || worker.runtime.turnRecoveryAttempts < 0 || worker.runtime.turnRecoveryAttempts > 1)) {
       throw blocked('invalid-runtime-turn-recovery-attempts');
     }
+    for (const key of ['turnInterruptionKey', 'turnInterruptionHandledKey']) {
+      if (Object.prototype.hasOwnProperty.call(worker.runtime, key)
+        && (typeof worker.runtime[key] !== 'string' || worker.runtime[key].length > 128)) {
+        throw blocked('invalid-runtime-' + key);
+      }
+    }
   }
 
   function assertFault(worker) {
