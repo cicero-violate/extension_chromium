@@ -4694,17 +4694,24 @@ flushWorkerHeartbeats = async function flushWorkerHeartbeatsC4() {
           && after?.runtime.busy === false
           && before.currentAssignmentId == null
           && after.currentAssignmentId == null;
-        if (unownedTurnQuiesced) {
+        const unownedTurnInterrupted = beforeTurnHealth !== 'interrupted'
+          && afterTurnHealth === 'interrupted'
+          && after?.runtime.busy === false
+          && before.currentAssignmentId == null
+          && after.currentAssignmentId == null;
+        if (unownedTurnQuiesced || unownedTurnInterrupted) {
           next.lastGoalContinuationKey = '';
           next = globalThis.ModelFleetStateM7C3.appendJournal(
             next,
-            'worker.unowned_turn_quiesced',
-            `${workerId} unowned ChatGPT turn became idle; goal continuation dedupe reset`,
-            { workerId },
+            unownedTurnInterrupted ? 'worker.unowned_turn_interrupted' : 'worker.unowned_turn_quiesced',
+            unownedTurnInterrupted
+              ? `${workerId} ChatGPT turn ended without a live Stop control; Coordinator reconciliation re-armed`
+              : `${workerId} unowned ChatGPT turn became idle; goal continuation dedupe reset`,
+            { workerId, turnHealth: afterTurnHealth },
             heartbeat.at,
           );
         }
-        scheduleNeeded = scheduleNeeded || result.result.scheduleNeeded === true || unownedTurnQuiesced;
+        scheduleNeeded = scheduleNeeded || result.result.scheduleNeeded === true || unownedTurnQuiesced || unownedTurnInterrupted;
       }
       replaceC3State(state, next);
       return { scheduleNeeded };
@@ -4811,6 +4818,7 @@ recoverRegisteredWorkerBridge = async function recoverRegisteredWorkerBridgeC4(w
   if (!tab) return { workerId, recovered: false, stale: true };
   const assignment = globalThis.ModelFleetStateM7C4.recoveryPayloadV2(loaded, worker.currentAssignmentId);
   const assignmentRecord = assignment.assignment;
+  let scheduleAfterBridgeRecovery = false;
   await setFleetRecoveryHint(worker.tabId, assignmentRecord?.id || null);
   try {
     const bridge = await ensureFleetBridge(worker.tabId);
@@ -4860,11 +4868,22 @@ recoverRegisteredWorkerBridge = async function recoverRegisteredWorkerBridgeC4(w
         });
         next = cleared.state;
       }
+      const interruptedNoOwner = outcome.result.ok === true
+        && outcome.result.outcome === 'no-owner'
+        && response.busy === false
+        && response.turnHealth === 'interrupted'
+        && beforeTurnHealth !== 'interrupted';
+      if (interruptedNoOwner) {
+        next.lastGoalContinuationKey = '';
+        next = globalThis.ModelFleetStateM7C3.appendJournal(next, 'worker.unowned_turn_interrupted', `${workerId} bridge recovered an interrupted unowned ChatGPT turn; Coordinator reconciliation re-armed`, { workerId, turnHealth: 'interrupted' }, observedAt);
+        scheduleAfterBridgeRecovery = true;
+      }
       next = globalThis.ModelFleetStateM7C3.appendJournal(next, 'worker.bridge_recovered', `${workerId} bridge recovery reconciled`, { assignmentId: assignmentRecord?.id || null, outcome: outcome.result.outcome || outcome.result.code || null }, observedAt);
       replaceC3State(state, next);
       return outcome.result;
     });
     if (['reattached-running', 'reattached', 'completion-reattached', 'no-owner', 'unrecoverable-released'].includes(result.result.outcome)) await setFleetRecoveryHint(worker.tabId, null);
+    if (scheduleAfterBridgeRecovery) schedule().catch(() => {});
     return { workerId, recovered: result.result.ok === true, assignmentId: assignmentRecord?.id || null, recovery: result.result };
   } catch (error) {
     const fresh = await loadFleetState().catch(() => null);

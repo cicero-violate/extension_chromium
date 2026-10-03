@@ -182,10 +182,26 @@
     return !!stopButton && usable(stopButton) && enabledButton(stopButton);
   }
 
-  function hasActiveThinkingIndicator() {
-    return [...document.querySelectorAll('[class*="cadencedShimmer"]')].some((node) => (
-      usable(node) && /^thinking(?:\u2026|\.{3})?$/i.test(String(node.innerText || node.textContent || '').trim())
+  function nodeFollowsLatestUserTurn(node) {
+    const user = latestUserTurnNode();
+    if (!user || !node || user === node) return false;
+    try {
+      return !!(user.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING);
+    } catch {
+      return false;
+    }
+  }
+
+  function currentThinkingNodes() {
+    return [...document.querySelectorAll('[class*="cadencedShimmer"]')].filter((node) => (
+      usable(node)
+      && /^thinking(?:\u2026|\.{3})?$/i.test(String(node.innerText || node.textContent || '').trim())
+      && nodeFollowsLatestUserTurn(node)
     ));
+  }
+
+  function hasActiveThinkingIndicator() {
+    return currentThinkingNodes().length > 0;
   }
 
   function isStreaming() {
@@ -219,9 +235,8 @@
   }
 
   function latestTurnProgressText() {
-    const thinking = [...document.querySelectorAll('[class*="cadencedShimmer"]')].find((node) => (
-      usable(node) && /^thinking(?:\u2026|\.{3})?$/i.test(String(node.innerText || node.textContent || '').trim())
-    ));
+    const thinkingNodes = currentThinkingNodes();
+    const thinking = thinkingNodes[thinkingNodes.length - 1] || null;
     let current = thinking;
     while (current && current !== document.body) {
       const text = String(current.innerText || current.textContent || '').replace(/\s+/g, ' ').trim();
@@ -237,10 +252,11 @@
     const observedAt = Date.now();
     const busy = !!active || !!pendingCompletion || isStreaming();
     if (!busy) {
+      const interrupted = hasActiveThinkingIndicator();
       turnLivenessNode(false)?.remove();
       return {
         busy: false,
-        turnHealth: 'idle',
+        turnHealth: interrupted ? 'interrupted' : 'idle',
         turnBusySince: 0,
         turnLastProgressAt: 0,
         turnStalledSince: 0,

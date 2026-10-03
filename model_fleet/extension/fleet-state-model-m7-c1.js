@@ -212,7 +212,7 @@
       throw blocked('invalid-runtime-reported-assignment');
     }
     if (Object.prototype.hasOwnProperty.call(worker.runtime, 'turnHealth')
-      && !['idle', 'busy', 'stalled', 'dead'].includes(worker.runtime.turnHealth)) {
+      && !['idle', 'busy', 'stalled', 'dead', 'interrupted'].includes(worker.runtime.turnHealth)) {
       throw blocked('invalid-runtime-turn-health');
     }
     for (const key of ['turnBusySince', 'turnLastProgressAt', 'turnStalledSince', 'turnRecoveryAt', 'turnRecoveryBusySince']) {

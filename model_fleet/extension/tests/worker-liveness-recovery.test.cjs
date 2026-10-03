@@ -200,3 +200,34 @@ test('DEAD orphan recovery is re-entered from heartbeat state, not a parallel ti
   assert.ok(background.includes("worker.runtime?.turnHealth === 'dead'"));
   assert.ok(background.includes('recoverDeadOrphanTurnV2(workerId).catch'));
 });
+
+
+test('latest-turn Thinking without Stop is INTERRUPTED, not BUSY', () => {
+  assert.ok(workerSource.includes('function currentThinkingNodes()'));
+  assert.ok(workerSource.includes('nodeFollowsLatestUserTurn(node)'));
+  assert.ok(workerSource.includes("turnHealth: interrupted ? 'interrupted' : 'idle'"));
+  const streamStart = workerSource.indexOf('function isStreaming()');
+  const streamEnd = workerSource.indexOf('function turnLivenessNode', streamStart);
+  assert.ok(workerSource.slice(streamStart, streamEnd).includes('return hasActiveStopControl()'));
+});
+
+test('historical Thinking shimmer is excluded from current-turn interruption evidence', () => {
+  assert.ok(workerSource.includes('user.compareDocumentPosition(node)'));
+  assert.ok(workerSource.includes('Node.DOCUMENT_POSITION_FOLLOWING'));
+  assert.ok(workerSource.includes('const thinkingNodes = currentThinkingNodes()'));
+});
+
+test('interrupted orphan turn re-arms Coordinator reconciliation exactly on transition', () => {
+  assert.ok(background.includes("const unownedTurnInterrupted = beforeTurnHealth !== 'interrupted'"));
+  assert.ok(background.includes("afterTurnHealth === 'interrupted'"));
+  assert.ok(background.includes("'worker.unowned_turn_interrupted'"));
+  assert.ok(background.includes("next.lastGoalContinuationKey = ''"));
+  assert.ok(background.includes('scheduleAfterBridgeRecovery = true'));
+});
+
+test('INTERRUPTED is projected into the worker status pill', () => {
+  const c16 = fs.readFileSync(path.join(extensionDir, 'fleet-state-model-m7-c16.js'), 'utf8');
+  const pane = fs.readFileSync(path.join(extensionDir, 'control-pane.js'), 'utf8');
+  assert.ok(c16.includes("worker.turnHealth === 'interrupted'"));
+  assert.ok(pane.includes("turnHealth === 'interrupted' ? 'interrupted'"));
+});

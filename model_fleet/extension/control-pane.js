@@ -456,8 +456,8 @@
       const rotating = lifecycle === 'rotating';
       const stale = workerIsStale(worker) || age === null || age > HEARTBEAT_STALE_SECONDS;
       const turnHealth = worker.turnHealth || (worker.runtimeBusy === true ? 'busy' : 'idle');
-      const status = stale ? 'offline' : turnHealth === 'dead' ? 'dead' : turnHealth === 'stalled' ? 'stalled' : worker.availability === 'busy' || worker.runtimeBusy === true ? 'busy' : warmIdle ? 'warm' : rotating ? 'rotating' : activating ? 'waking' : workerStatus(worker, 'idle');
-      const statusClass = status === 'running' || status === 'waking' || status === 'busy' ? 'running' : status === 'blocked' || status === 'offline' || status === 'dead' || status === 'stalled' ? 'blocked' : 'pending';
+      const status = stale ? 'offline' : turnHealth === 'dead' ? 'dead' : turnHealth === 'stalled' ? 'stalled' : turnHealth === 'interrupted' ? 'interrupted' : worker.availability === 'busy' || worker.runtimeBusy === true ? 'busy' : warmIdle ? 'warm' : rotating ? 'rotating' : activating ? 'waking' : workerStatus(worker, 'idle');
+      const statusClass = status === 'running' || status === 'waking' || status === 'busy' ? 'running' : status === 'blocked' || status === 'offline' || status === 'dead' || status === 'stalled' || status === 'interrupted' ? 'blocked' : 'pending';
       const assignment = workerAssignment(worker);
       const queue = snapshot?.diagnostics?.queueByWorker?.[worker.id] || {};
       const queuedCount = Math.max(0, Number(queue.queuedCount || 0));
@@ -503,8 +503,8 @@
       const rotating = lifecycle === "rotating";
       const stale = workerIsStale(worker) || age === null || age > HEARTBEAT_STALE_SECONDS;
       const turnHealth = worker.turnHealth || (worker.runtimeBusy === true ? "busy" : "idle");
-      const status = stale ? "offline" : turnHealth === "dead" ? "dead" : turnHealth === "stalled" ? "stalled" : worker.availability === "busy" || worker.runtimeBusy === true ? "busy" : warmIdle ? "warm" : rotating ? "rotating" : activating ? "waking" : workerStatus(worker, "idle");
-      const statusClass = status === "running" || status === "waking" || status === "busy" ? "running" : status === "blocked" || status === "offline" || status === "dead" || status === "stalled" ? "blocked" : "pending";
+      const status = stale ? "offline" : turnHealth === "dead" ? "dead" : turnHealth === "stalled" ? "stalled" : turnHealth === "interrupted" ? "interrupted" : worker.availability === "busy" || worker.runtimeBusy === true ? "busy" : warmIdle ? "warm" : rotating ? "rotating" : activating ? "waking" : workerStatus(worker, "idle");
+      const statusClass = status === "running" || status === "waking" || status === "busy" ? "running" : status === "blocked" || status === "offline" || status === "dead" || status === "stalled" || status === "interrupted" ? "blocked" : "pending";
       const pill = root.querySelector(".topline .pill");
       if (pill) {
         pill.className = `pill ${statusClass}`;

@@ -51,11 +51,11 @@
     if (own(observation, 'title') && observation.title !== '' && typeof observation.title !== 'string') throw reject('invalid-heartbeat-title');
     if (own(observation, 'url') && observation.url !== '' && typeof observation.url !== 'string') throw reject('invalid-heartbeat-url');
     if (own(observation, 'windowId') && observation.windowId !== null && !Number.isInteger(observation.windowId)) throw reject('invalid-heartbeat-window-id');
-    if (own(observation, 'turnHealth') && !['idle', 'busy', 'stalled', 'dead'].includes(observation.turnHealth)) throw reject('invalid-heartbeat-turn-health');
+    if (own(observation, 'turnHealth') && !['idle', 'busy', 'stalled', 'dead', 'interrupted'].includes(observation.turnHealth)) throw reject('invalid-heartbeat-turn-health');
     for (const key of ['turnBusySince', 'turnLastProgressAt', 'turnStalledSince']) {
       if (own(observation, key) && (!Number.isFinite(observation[key]) || observation[key] < 0)) throw reject('invalid-heartbeat-' + key);
     }
-    if (observation.busy === false && own(observation, 'turnHealth') && observation.turnHealth !== 'idle') throw reject('idle-heartbeat-nonidle-turn-health');
+    if (observation.busy === false && own(observation, 'turnHealth') && !['idle', 'interrupted'].includes(observation.turnHealth)) throw reject('idle-heartbeat-nonidle-turn-health');
     if (['stalled', 'dead'].includes(observation.turnHealth) && observation.busy !== true) throw reject('turn-health-requires-busy');
   }
   function observationMetadata(next, worker, observation) {
