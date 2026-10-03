@@ -143,6 +143,30 @@ test('v2 continuation is allowed when pending tasks are not dispatchable because
   assert.equal(message.toWorkerId, 'W-C1');
 });
 
+
+
+test('a continuation-created pending blocked child does not advance the continuation frontier by itself', () => {
+  const { queueGoalContinuationV2 } = continuationHarness();
+  const state = quietState({
+    tasks: {
+      'T-5': { id: 'T-5', phase: 'blocked', role: 'review', dependencies: [], createdAt: 500, completedAt: 600, attempts: 1, lastAutoRecoveryReason: '' },
+    },
+  });
+  const first = queueGoalContinuationV2(state, 1000);
+  assert.ok(first);
+  first.phase = 'done';
+  state.tasks['T-6'] = {
+    id: 'T-6', phase: 'pending', role: 'review', dependencies: ['T-5'],
+    createdAt: 1100, completedAt: 0, attempts: 0, lastAutoRecoveryReason: '',
+  };
+  assert.equal(queueGoalContinuationV2(state, 1200), null);
+  state.tasks['T-6'].phase = 'blocked';
+  state.tasks['T-6'].completedAt = 1250;
+  const resumed = queueGoalContinuationV2(state, 1300);
+  assert.ok(resumed);
+  assert.equal(resumed.goalContinuation, true);
+});
+
 test('v2 continuation is disabled for empty goal, paused policy, and revoked authority', () => {
   const { queueGoalContinuationV2 } = continuationHarness();
   for (const overrides of [

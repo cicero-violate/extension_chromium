@@ -5242,10 +5242,17 @@ function c5QueueMessage(state, input, at) {
   return message;
 }
 function goalFrontierKeyV2(state) {
+  const messages = Array.isArray(state.messages) ? state.messages : [];
+  const latestGoalContinuationAt = messages
+    .filter((message) => message?.goalContinuation === true)
+    .reduce((latest, message) => Math.max(latest, Number(message.createdAt || 0)), 0);
   const taskState = Object.values(state.tasks || {})
+    .filter((task) => task?.phase !== 'pending'
+      || latestGoalContinuationAt <= 0
+      || Number(task.createdAt || 0) <= latestGoalContinuationAt)
     .sort((a, b) => String(a.id || '').localeCompare(String(b.id || ''), undefined, { numeric: true }))
     .map((task) => [task.id, task.phase, Number(task.completedAt || 0), Number(task.attempts || 0), String(task.lastAutoRecoveryReason || '')]);
-  const messageState = (Array.isArray(state.messages) ? state.messages : [])
+  const messageState = messages
     .filter((message) => message && message.goalContinuation !== true && message.toWorkerId !== 'operator')
     .map((message) => [message.id, message.phase, message.fromWorkerId || message.from || '', message.toWorkerId || '', Number(message.completedAt || 0), Number(message.autoRecoveryAttempts || 0), String(message.lastAutoRecoveryReason || '')]);
   return compactFleetFingerprint(JSON.stringify({ goal: String(state.goal || '').trim(), tasks: taskState, messages: messageState }));
