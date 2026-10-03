@@ -57,7 +57,8 @@
     if (worker.currentAssignmentId != null) return 'running';
     const heartbeat = worker.runtime.lastHeartbeatAt;
     const fresh = heartbeat > 0 && now >= heartbeat && now - heartbeat <= heartbeatMaxAgeMs;
-    if (worker.runtime.busy === true && fresh) return 'busy';
+    if (!fresh) return 'offline';
+    if (worker.runtime.busy === true) return 'busy';
     return 'idle';
   }
   function workerAvailability(state, workerId, options = {}) {

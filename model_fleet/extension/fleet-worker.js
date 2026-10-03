@@ -2,6 +2,8 @@
   'use strict';
 
   const HEARTBEAT_MS = 10000;
+  const REGISTRATION_RETRY_BASE_MS = 2000;
+  const REGISTRATION_RETRY_MAX_MS = 30000;
   const MONITOR_THROTTLE_MS = 500;
   const COMPOSER_READY_TIMEOUT_MS = 20000;
   const COMPOSER_CHUNK_CHARS = 1200;
@@ -18,6 +20,10 @@
 
   let registered = false;
   let registeredWorkerId = null;
+  let registrationEnabled = true;
+  let registrationRetryPromise = null;
+  let registrationRetryAt = 0;
+  let registrationRetryDelayMs = REGISTRATION_RETRY_BASE_MS;
   let heartbeatTimer = null;
   let monitorSettleTimer = null;
   let monitorObserver = null;
@@ -1034,8 +1040,38 @@
     }
   }
 
+  function markRegistrationLost() {
+    registered = false;
+    registrationRetryAt = 0;
+  }
+
+  async function ensureRegistered(force = false) {
+    if (!registrationEnabled) return false;
+    if (registered) return true;
+    const observedAt = Date.now();
+    if (!force && observedAt < registrationRetryAt) return false;
+    if (registrationRetryPromise) return registrationRetryPromise;
+    registrationRetryPromise = (async () => {
+      const ok = await hello();
+      if (ok) {
+        registrationRetryAt = 0;
+        registrationRetryDelayMs = REGISTRATION_RETRY_BASE_MS;
+        return true;
+      }
+      registrationRetryAt = Date.now() + registrationRetryDelayMs;
+      registrationRetryDelayMs = Math.min(REGISTRATION_RETRY_MAX_MS, registrationRetryDelayMs * 2);
+      return false;
+    })();
+    try {
+      return await registrationRetryPromise;
+    } finally {
+      registrationRetryPromise = null;
+    }
+  }
+
   async function heartbeat() {
-    if (!registered) return;
+    if (!registrationEnabled) return;
+    if (!registered && !(await ensureRegistered())) return;
     if (pendingCompletion) {
       const recovered = await recoverPendingCompletion();
       if (!recovered || pendingCompletion) return;
@@ -1048,14 +1084,15 @@
         title: document.title,
         url: location.href,
       });
-      if (!response?.ok) registered = false;
+      if (!response?.ok || response?.registered === false) markRegistrationLost();
     } catch {
-      // Service worker may be waking/restarting; next heartbeat retries.
+      // Service worker may be waking/restarting; next heartbeat retries without
+      // discarding the last proven registration identity.
     }
   }
 
   function startHeartbeat() {
-    if (heartbeatTimer !== null || !registered) return;
+    if (heartbeatTimer !== null || !registrationEnabled) return;
     heartbeat();
     heartbeatTimer = setInterval(heartbeat, HEARTBEAT_MS);
   }
@@ -1071,8 +1108,15 @@
     if (!message || typeof message.type !== 'string') return false;
 
     if (message.type === 'fleet:bridge-ping') {
-      sendResponse({ ok: true, registered, activeAssignmentId: active?.assignment.id || pendingCompletion?.assignmentId || null });
+      sendResponse({ ok: true, registered, registeredWorkerId, activeAssignmentId: active?.assignment.id || pendingCompletion?.assignmentId || null });
       return false;
+    }
+
+    if (message.type === 'fleet:ensure-registration') {
+      ensureRegistered(true)
+        .then((ok) => sendResponse({ ok, registered, registeredWorkerId, activeAssignmentId: active?.assignment.id || pendingCompletion?.assignmentId || null }))
+        .catch((error) => sendResponse({ ok: false, registered: false, error: String(error) }));
+      return true;
     }
 
     if (message.type === 'fleet:execute-assignment') {
@@ -1098,6 +1142,9 @@
 
     if (message.type === 'fleet:registration-changed') {
       if (message.registered === true) {
+        registrationEnabled = true;
+        registrationRetryAt = 0;
+        registrationRetryDelayMs = REGISTRATION_RETRY_BASE_MS;
         const hasExpected = Object.prototype.hasOwnProperty.call(message, 'expectedWorkerId');
         const expectedWorkerId = hasExpected ? String(message.expectedWorkerId || '') : '';
         if (hasExpected && registeredWorkerId !== null && registeredWorkerId !== expectedWorkerId) {
@@ -1109,6 +1156,7 @@
         else if (message.worker?.id) registeredWorkerId = String(message.worker.id);
         recoverPendingCompletion().finally(() => startHeartbeat());
       } else {
+        registrationEnabled = false;
         const hasExpected = Object.prototype.hasOwnProperty.call(message, 'expectedWorkerId');
         if (hasExpected && registeredWorkerId !== String(message.expectedWorkerId || '')) {
           sendResponse({ ok: true, noOp: true, code: 'registration-identity-mismatch', registeredWorkerId });
@@ -1131,12 +1179,18 @@
         type: 'fleet:worker-hello',
         activeAssignmentId: active?.assignment.id || pendingCompletion?.assignmentId || readAssignmentRecoveryHint() || null,
       });
-      registered = response?.registered === true;
-      registeredWorkerId = registered ? (response?.worker?.id ? String(response.worker.id) : null) : null;
-      if (registered) startHeartbeat();
+      const nextRegistered = response?.registered === true;
+      const nextWorkerId = nextRegistered && response?.worker?.id ? String(response.worker.id) : null;
+      if (nextRegistered && registeredWorkerId && nextWorkerId && registeredWorkerId !== nextWorkerId) {
+        registered = false;
+        return false;
+      }
+      registered = nextRegistered;
+      if (registered) registeredWorkerId = nextWorkerId || registeredWorkerId;
+      return registered;
     } catch {
       registered = false;
-      registeredWorkerId = null;
+      return false;
     }
   }
 
@@ -1148,9 +1202,13 @@
   async function bootstrap() {
     if (pendingCompletion) {
       const recovered = await recoverPendingCompletion();
-      if (!recovered && pendingCompletion) return;
+      if (!recovered && pendingCompletion) {
+        startHeartbeat();
+        return;
+      }
     }
-    await hello();
+    startHeartbeat();
+    await ensureRegistered(true);
   }
 
   bootstrap();

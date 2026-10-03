@@ -807,26 +807,40 @@ async function ensureFleetConnectorHelper(tabId) {
   }
 }
 
-async function ensureFleetBridge(tabId) {
+async function ensureResponsiveRegisteredFleetBridge(tabId) {
+  let response;
   try {
-    const response = await chrome.tabs.sendMessage(tabId, { type: 'fleet:bridge-ping' });
-    if (response?.ok) {
-      await ensureFleetConnectorHelper(tabId);
-      return response;
-    }
+    response = await chrome.tabs.sendMessage(tabId, { type: 'fleet:bridge-ping' });
   } catch {
-    // Inject below when the static content script is not present in an already-open tab.
+    return { responsive: false, response: null };
+  }
+  if (!response?.ok) return { responsive: false, response };
+  if (response.registered === true) return { responsive: true, registered: true, response };
+  try {
+    const repaired = await chrome.tabs.sendMessage(tabId, { type: 'fleet:ensure-registration' });
+    if (repaired?.ok && repaired.registered === true) return { responsive: true, registered: true, response: repaired };
+    return { responsive: true, registered: false, response: repaired || response };
+  } catch (error) {
+    return { responsive: true, registered: false, response, error: String(error) };
+  }
+}
+
+async function ensureFleetBridge(tabId) {
+  const existing = await ensureResponsiveRegisteredFleetBridge(tabId);
+  if (existing.registered === true) {
+    await ensureFleetConnectorHelper(tabId);
+    return existing.response;
+  }
+  if (existing.responsive === true) {
+    throw new Error('fleet bridge is responsive but registration could not be re-established');
   }
   await ensureFleetConnectorHelper(tabId);
   await chrome.scripting.executeScript({ target: { tabId }, files: ['fleet-worker.js'] });
-  try {
-    const response = await chrome.tabs.sendMessage(tabId, { type: 'fleet:bridge-ping' });
-    if (response?.ok) return response;
-  } catch {
-    // Fall through to a hard failure. Reconciliation must never invent an idle bridge,
-    // because an old extension context may have a completion handoff waiting in-page.
-  }
-  throw new Error('fleet bridge did not answer ping after injection');
+  const injected = await ensureResponsiveRegisteredFleetBridge(tabId);
+  if (injected.registered === true) return injected.response;
+  throw new Error(injected.responsive
+    ? 'fleet bridge responded after injection but registration was not established'
+    : 'fleet bridge did not answer ping after injection');
 }
 
 async function setFleetRecoveryHint(tabId, assignmentId = null) {
@@ -3336,6 +3350,7 @@ async function reconcileFleetTopology() {
     let deferredRemovals = 0;
 
     await reconcileStaleWorkerBindings('topology reconciliation');
+    await recoverRegisteredFleetBridges('topology reconciliation');
     let state = await loadFleetState();
     const desired = normalizeTopology(state.topology).desiredRoleCounts;
 
@@ -4493,6 +4508,41 @@ async function dispatchReservedC3Candidate(dispatch) {
   }
 }
 
+const AUTOMATIC_BRIDGE_RECOVERY_COOLDOWN_MS = 15000;
+let lastAutomaticBridgeRecoveryAt = 0;
+function staleHeartbeatRecoveryNeededV2(state, at) {
+  if (!state || state.version !== 2 || state.policy?.paused === true || state.policy?.authorityEnabled === false) return false;
+  const c2 = globalThis.ModelFleetStateM7C2;
+  const queuedTargets = new Set((state.messages || [])
+    .filter((message) => message.phase === 'queued' && message.toWorkerId && message.toWorkerId !== 'operator')
+    .map((message) => message.toWorkerId));
+  return Object.values(state.workers || {}).some((worker) => {
+    if (!worker?.enabled || !Number.isInteger(worker.tabId) || worker.currentAssignmentId != null) return false;
+    if (worker.lifecycle === 'stale' || worker.lifecycle === 'offline') return false;
+    let eligibility;
+    try { eligibility = c2.schedulerWorkerEligibility(state, worker.id, { now: at }); }
+    catch { return false; }
+    if (eligibility.reason !== 'availability-offline') return false;
+    const hasQueued = queuedTargets.has(worker.id);
+    const hasControl = Array.isArray(worker.controlInbox) && worker.controlInbox.length > 0;
+    const hasRunnableRoleTask = Object.values(state.tasks || {}).some((task) => {
+      if (canonicalRole(task.role) !== canonicalRole(worker.role)) return false;
+      try { return c2.taskRunnable(state, task, worker); } catch { return false; }
+    });
+    const hasGoalContinuationNeed = canonicalRole(worker.role) === 'coordinator' && Boolean(String(state.goal || '').trim());
+    return hasQueued || hasControl || hasRunnableRoleTask || hasGoalContinuationNeed;
+  });
+}
+function maybeRecoverStaleDispatchBridgesV2(state, at) {
+  if (!staleHeartbeatRecoveryNeededV2(state, at)) return false;
+  if (at - lastAutomaticBridgeRecoveryAt < AUTOMATIC_BRIDGE_RECOVERY_COOLDOWN_MS) return false;
+  lastAutomaticBridgeRecoveryAt = at;
+  recoverRegisteredFleetBridges('automatic stale-heartbeat recovery').catch((error) => {
+    console.warn('[model-fleet] automatic stale-heartbeat recovery deferred', error);
+  });
+  return true;
+}
+
 const scheduleC3ReservationTransport = schedule;
 schedule = async function scheduleC3Candidate() {
   const preview = await loadFleetState();
@@ -4500,16 +4550,19 @@ schedule = async function scheduleC3Candidate() {
   if (fleetBridgeRecoveryPromise || scheduling) { schedulePending = true; return; }
   scheduling = true;
   let dispatches = [];
+  let recoveryState = null;
   try {
     const committed = await mutateFleet((state) => {
       const dispatches = chooseDispatches(state);
       return dispatches;
     });
     dispatches = Array.isArray(committed.result) ? committed.result : [];
+    recoveryState = committed.state;
   } finally {
     scheduling = false;
     if (schedulePending) { schedulePending = false; queueMicrotask(() => schedule().catch(() => {})); }
   }
+  if (!dispatches.length && recoveryState) maybeRecoverStaleDispatchBridgesV2(recoveryState, now());
   for (const dispatch of dispatches) dispatchReservedC3Candidate(dispatch).catch(() => {});
 };
 
