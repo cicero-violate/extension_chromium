@@ -4554,10 +4554,12 @@ schedule = async function scheduleC3Candidate() {
   try {
     const committed = await mutateFleet((state) => {
       const dispatches = chooseDispatches(state);
-      return dispatches;
+      const continuation = dispatches.length ? null : queueGoalContinuationV2(state, now());
+      return { dispatches, continuationQueued: Boolean(continuation) };
     });
-    dispatches = Array.isArray(committed.result) ? committed.result : [];
+    dispatches = Array.isArray(committed.result?.dispatches) ? committed.result.dispatches : [];
     recoveryState = committed.state;
+    if (committed.result?.continuationQueued) schedulePending = true;
   } finally {
     scheduling = false;
     if (schedulePending) { schedulePending = false; queueMicrotask(() => schedule().catch(() => {})); }
@@ -5237,6 +5239,69 @@ function c5QueueMessage(state, input, at) {
     state.messages.splice(victim, 1);
   }
   c5JournalInPlace(state, 'message.queued', `${id}: ${input.fromWorkerId || input.from || 'operator'} → ${input.toWorkerId}`, { taskId: message.taskId }, at);
+  return message;
+}
+function goalFrontierKeyV2(state) {
+  const taskState = Object.values(state.tasks || {})
+    .sort((a, b) => String(a.id || '').localeCompare(String(b.id || ''), undefined, { numeric: true }))
+    .map((task) => [task.id, task.phase, Number(task.completedAt || 0), Number(task.attempts || 0), String(task.lastAutoRecoveryReason || '')]);
+  const messageState = (Array.isArray(state.messages) ? state.messages : [])
+    .filter((message) => message && message.goalContinuation !== true && message.toWorkerId !== 'operator')
+    .map((message) => [message.id, message.phase, message.fromWorkerId || message.from || '', message.toWorkerId || '', Number(message.completedAt || 0), Number(message.autoRecoveryAttempts || 0), String(message.lastAutoRecoveryReason || '')]);
+  return compactFleetFingerprint(JSON.stringify({ goal: String(state.goal || '').trim(), tasks: taskState, messages: messageState }));
+}
+function hasDispatchablePendingTaskV2(state, at, c2) {
+  const workers = Object.values(state.workers || {});
+  return Object.values(state.tasks || {}).some((task) => {
+    if (!task || task.phase !== 'pending') return false;
+    return workers.some((worker) => {
+      if (!worker || canonicalRole(worker.role) !== canonicalRole(task.role)) return false;
+      try {
+        return c2.schedulerWorkerEligibility(state, worker.id, { now: at }).eligible
+          && c2.taskRunnable(state, task, worker);
+      } catch {
+        return false;
+      }
+    });
+  });
+}
+function queueGoalContinuationV2(state, at) {
+  const goal = String(state.goal || '').trim();
+  if (!goal || state.policy?.paused || state.policy?.authorityEnabled === false) return null;
+  if (Object.keys(state.assignments || {}).length) return null;
+  if ((state.messages || []).some((message) => message && message.toWorkerId !== 'operator' && ['queued', 'running'].includes(message.phase))) return null;
+  if (Object.values(state.workers || {}).some((worker) => Array.isArray(worker?.controlInbox) && worker.controlInbox.length)) return null;
+  const c2 = globalThis.ModelFleetStateM7C2;
+  if (!c2) return null;
+  if (hasDispatchablePendingTaskV2(state, at, c2)) return null;
+  const coordinator = Object.values(state.workers || {})
+    .filter((worker) => worker && canonicalRole(worker.role) === 'coordinator')
+    .sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }))
+    .find((worker) => {
+      try { return c2.schedulerWorkerEligibility(state, worker.id, { now: at }).eligible; } catch { return false; }
+    });
+  if (!coordinator) return null;
+  const frontierKey = goalFrontierKeyV2(state);
+  if (frontierKey && frontierKey === String(state.lastGoalContinuationKey || '')) return null;
+  const message = c5QueueMessage(state, {
+    from: 'scheduler',
+    toWorkerId: coordinator.id,
+    goalContinuation: true,
+    body: [
+      'GOAL CONTINUATION.',
+      'The fleet is quiescent: no semantic messages, runnable tasks, active assignments, or control notices remain, but the fleet goal is still set.',
+      `Goal: ${goal}`,
+      '',
+      'Reconcile the current durable fleet state and continue toward the goal.',
+      '- Inspect existing task/message results and failures before creating new work.',
+      '- If unfinished, emit only the bounded next FLEET_TASK/FLEET_MESSAGE work required by the current frontier.',
+      '- If blocked, report the exact blocker to operator.',
+      '- If the goal is genuinely complete, report completion to operator and emit no new work.',
+      '- Do not create work merely to keep workers busy.',
+    ].join('\n'),
+  }, at);
+  state.lastGoalContinuationKey = frontierKey;
+  c5JournalInPlace(state, 'goal.continuation_queued', `${message.id} queued to ${coordinator.id}`, { workerId: coordinator.id, frontierKey }, at);
   return message;
 }
 function c5CreateTask(state, input, at, workerId) {
