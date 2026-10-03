@@ -8,6 +8,7 @@
   const clone = (value) => typeof global.structuredClone === 'function' ? global.structuredClone(value) : JSON.parse(JSON.stringify(value));
   const positive = (value) => Number.isFinite(value) && value > 0;
   const integer = (value) => Number.isInteger(value) && value >= 0;
+  const AMBIGUOUS_POST_SEND_RECOVERY_PREFIX = 'post-send submission unproven:';
   function reject(reason) { const error = new Error(`M7 C6 cancellation rejected: ${reason}`); error.code = 'M7_C6_REJECTED'; error.reason = reason; return error; }
   function normalize(state) { try { return C3.normalizeV2(state); } catch (error) { throw reject(`invalid-v2-state:${error.reason || error.message}`); } }
   function finalize(state) { try { return C3.finalizeV2(state); } catch (error) { throw reject(`invalid-v2-result:${error.reason || error.message}`); } }
@@ -66,18 +67,19 @@
     const attempts = items.map((item) => item.autoRecoveryAttempts === undefined ? 0 : item.autoRecoveryAttempts);
     if (!attempts.every(integer)) throw reject('invalid-auto-recovery-attempts');
     const used = Math.max(assignment.recoveryAttempt, ...attempts);
-    const retry = used < 1;
+    const recoveryReason = String(reason || `assignment recovery ${assignmentId}`);
+    const ambiguousPostSend = recoveryReason.startsWith(AMBIGUOUS_POST_SEND_RECOVERY_PREFIX);
+    const retry = !ambiguousPostSend && used < 1;
     const outcome = release(source, { workerId, assignmentId, disposition: retry ? 'requeue' : 'blocked' });
     if (!outcome.result.ok) return outcome;
     const nextItems = itemList(outcome.state, { ...assignment, phase: 'released' }, outcome.state.workers[workerId]);
-    const recoveryReason = String(reason || `assignment recovery ${assignmentId}`);
     for (const item of nextItems) {
       item.lastAutoRecoveryReason = recoveryReason;
       if (retry) item.autoRecoveryAttempts = used + 1;
       if (assignment.kind === 'task') item.statusNote = `automatic recovery ${retry ? used + 1 : used}/1: ${recoveryReason}`;
       if (assignment.kind === 'message') item.lastDeferredReason = `automatic recovery ${retry ? used + 1 : used}/1: ${recoveryReason}`;
     }
-    return { state: finalize(outcome.state), result: { ...outcome.result, recoveryAttempt: retry ? used + 1 : used, retryScheduled: retry, outcome: retry ? 'requeued' : 'exhausted-blocked', reason: recoveryReason } };
+    return { state: finalize(outcome.state), result: { ...outcome.result, recoveryAttempt: retry ? used + 1 : used, retryScheduled: retry, outcome: retry ? 'requeued' : ambiguousPostSend ? 'submission-uncertain-blocked' : 'exhausted-blocked', reason: recoveryReason } };
   }
   global.ModelFleetStateM7C6 = Object.freeze({ cancelAssignment, releaseGenericCancellation, applyAutomaticRecovery });
 }(globalThis));

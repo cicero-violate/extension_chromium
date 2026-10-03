@@ -112,7 +112,7 @@ test('picker card detection does not depend on a fixed-position ancestor', () =>
   const start = attachmentSource.indexOf('function findPickerCard');
   const end = attachmentSource.indexOf('async function ensureConnectorAttached', start);
   const section = attachmentSource.slice(start, end);
-  assert.match(section, /querySelectorAll\('button'\)/);
+  assert.ok(section.includes('button,[role="menuitem"],[role="option"]'));
   assert.match(section, /label\.includes\(CONNECTOR_NAME\)/);
   assert.doesNotMatch(section, /position === ['"]fixed['"]/);
 });

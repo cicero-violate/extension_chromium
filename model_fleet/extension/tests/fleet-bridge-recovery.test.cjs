@@ -87,12 +87,14 @@ test('worker reattaches only when the current page proves the fleet turn', () =>
 });
 
 test('worker prompt proof checks the latest user turn against the assignment prompt', () => {
-  const body = section(worker, 'function assignmentPromptObserved', 'function writeCompletionHandoff');
-  assert.match(body, /normalizedTurnText\(assignment\?\.prompt/);
-  assert.match(body, /latestUserTurnText\(\)/);
-  assert.match(body, /actual === expected/);
-  assert.match(body, /actual\.includes\(head\)/);
-  assert.match(body, /actual\.includes\(tail\)/);
+  const assignmentBody = section(worker, 'function assignmentPromptObserved', 'function userTurnAfter');
+  assert.match(assignmentBody, /promptTextObserved\(assignment\?\.prompt/);
+  const matcherBody = section(worker, 'function promptTextObserved', 'function assignmentPromptObserved');
+  assert.match(matcherBody, /normalizedTurnText\(prompt/);
+  assert.match(matcherBody, /latestUserTurnNode\(\)/);
+  assert.match(matcherBody, /actual === expected/);
+  assert.match(matcherBody, /actual\.includes\(head\)/);
+  assert.match(matcherBody, /actual\.includes\(tail\)/);
 });
 
 test('fleet-worker exposes explicit assignment recovery RPC', () => {

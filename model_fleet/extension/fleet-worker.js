@@ -8,6 +8,7 @@
   const COMPOSER_READY_TIMEOUT_MS = 20000;
   const COMPOSER_CHUNK_CHARS = 1200;
   const COMPOSER_CHUNK_SETTLE_TIMEOUT_MS = 2500;
+  const PROMPT_SUBMISSION_TIMEOUT_MS = 10000;
   // ChatGPT tool calls and long model responses can legitimately take more
   // than a few seconds. Keep an assignment alive long enough for those turns
   // to produce their final FLEET_STATUS marker.
@@ -15,6 +16,8 @@
   const WATCHDOG_INTERVAL_MS = 60000;
   const HARD_ASSIGNMENT_TIMEOUT_MS = 15 * 60 * 1000;
   const AUTO_RECOVERY_REASON_PREFIX = 'auto-recovery: ';
+  const AMBIGUOUS_POST_SEND_RECOVERY_PREFIX = 'post-send submission unproven:';
+  const SUBMISSION_UNPROVEN_AFTER_CLICK_CODE = 'FLEET_SUBMISSION_UNPROVEN_AFTER_CLICK';
   const COMPLETION_HANDOFF_ID = '__model_fleet_completion_handoff__';
   const ASSIGNMENT_RECOVERY_HINT_ID = '__model_fleet_assignment_recovery__';
   const TURN_LIVENESS_ID = '__model_fleet_turn_liveness__';
@@ -85,29 +88,73 @@
     return normalizeFleetProtocolSource(text).replace(/\s+/g, ' ').trim();
   }
 
-  function latestUserTurnNode() {
-    const candidates = document.querySelectorAll(
+  function userTurnNodes() {
+    return [...document.querySelectorAll(
       '[data-message-author-role="user"], [class~="group/user-message"], .user-message',
-    );
+    )];
+  }
+
+  function latestUserTurnNode() {
+    const candidates = userTurnNodes();
     return candidates[candidates.length - 1] || null;
   }
 
-  function latestUserTurnText() {
-    const candidates = document.querySelectorAll(
-      '[data-message-author-role="user"], [class~="group/user-message"], .user-message',
-    );
-    const node = candidates[candidates.length - 1] || null;
+  function userTurnText(node) {
     return String(node?.innerText || node?.textContent || '').trim();
   }
 
-  function assignmentPromptObserved(assignment) {
-    const expected = normalizedTurnText(assignment?.prompt || '');
-    const actual = normalizedTurnText(latestUserTurnText());
+  function latestUserTurnText() {
+    return userTurnText(latestUserTurnNode());
+  }
+
+  function promptTextObserved(prompt, userTurn = latestUserTurnNode()) {
+    const expected = normalizedTurnText(prompt || '');
+    const actual = normalizedTurnText(userTurnText(userTurn));
     if (!expected || !actual) return false;
     if (actual === expected) return true;
     const head = expected.slice(0, Math.min(240, expected.length));
     const tail = expected.slice(Math.max(0, expected.length - Math.min(240, expected.length)));
     return expected.length >= 160 && actual.includes(head) && actual.includes(tail);
+  }
+
+  function assignmentPromptObserved(assignment) {
+    return promptTextObserved(assignment?.prompt || '');
+  }
+
+  function submissionUnprovenAfterClick(message) {
+    const error = new Error(message);
+    error.code = SUBMISSION_UNPROVEN_AFTER_CLICK_CODE;
+    return error;
+  }
+
+  function userTurnAfter(previousUserTurn) {
+    const candidates = userTurnNodes();
+    const current = candidates[candidates.length - 1] || null;
+    if (!current) return null;
+    if (!previousUserTurn) return current;
+    const previousIndex = candidates.indexOf(previousUserTurn);
+    if (previousIndex < 0 || previousIndex >= candidates.length - 1) return null;
+    return current;
+  }
+
+  async function waitForPromptSubmission(prompt, previousUserTurn, timeoutMs = PROMPT_SUBMISSION_TIMEOUT_MS) {
+    const deadline = Date.now() + Math.max(1, Number(timeoutMs) || PROMPT_SUBMISSION_TIMEOUT_MS);
+    while (Date.now() < deadline) {
+      const current = userTurnAfter(previousUserTurn);
+      if (current) {
+        if (!promptTextObserved(prompt, current)) {
+          throw submissionUnprovenAfterClick('ChatGPT created a new user turn after Send, but it did not match the fleet prompt');
+        }
+        return current;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    const current = userTurnAfter(previousUserTurn);
+    if (!current) return null;
+    if (!promptTextObserved(prompt, current)) {
+      throw submissionUnprovenAfterClick('ChatGPT created a new user turn after Send, but it did not match the fleet prompt');
+    }
+    return current;
   }
 
   function writeCompletionHandoff(completed, text, responseTerminalAt = 0) {
@@ -170,6 +217,16 @@
       && !el.disabled
       && !el.hasAttribute('disabled')
       && el.getAttribute('aria-disabled') !== 'true';
+  }
+
+  function isStopControl(element) {
+    if (!element) return false;
+    const identity = [
+      element.getAttribute?.('data-testid') || '',
+      element.getAttribute?.('aria-label') || '',
+      element.textContent || '',
+    ].join(' ');
+    return /stop/i.test(identity);
   }
 
   function hasActiveStopControl() {
@@ -497,16 +554,17 @@
   function findSendButton() {
     const selectors = [
       '#composer-submit-button[data-testid="send-button"]',
+      '#composer-submit-button',
       'button[data-testid="send-button"]',
       'button[data-testid*="send" i]',
       'button[aria-label="Send prompt"]',
       'button[aria-label="Send"]',
     ];
     const candidates = [...document.querySelectorAll(selectors.join(', '))];
-    const visible = candidates.find((button) => usable(button));
+    const visible = candidates.find((button) => usable(button) && !isStopControl(button));
     if (visible) return visible;
     return [...document.querySelectorAll('button')].find((button) => {
-      if (!usable(button)) return false;
+      if (!usable(button) || isStopControl(button)) return false;
       return /^send(?: prompt| message)?$/i.test((button.getAttribute('aria-label') || '').trim());
     }) || null;
   }
@@ -772,9 +830,18 @@
     }
 
     const baseline = latestAssistantSnapshot(true);
+    const previousUserTurn = latestUserTurnNode();
     const sentAt = Date.now();
     sendButton.click();
-    return { baseline, baselineText: baseline.text, sentAt };
+    const proofTimeoutMs = Math.min(
+      PROMPT_SUBMISSION_TIMEOUT_MS,
+      Math.max(1, Number(sendReadyTimeoutMs) || PROMPT_SUBMISSION_TIMEOUT_MS),
+    );
+    const submittedUserTurn = await waitForPromptSubmission(text, previousUserTurn, proofTimeoutMs);
+    if (!submittedUserTurn) {
+      throw submissionUnprovenAfterClick('ChatGPT Send click was not proven: no new matching user turn appeared');
+    }
+    return { baseline, baselineText: baseline.text, sentAt, submissionProven: true };
   }
 
   function stopResponseMonitor() {
@@ -1046,11 +1113,15 @@
 
   async function prepareAndSendActive(assignmentId) {
     const current = active;
-    if (!current || current.assignment.id !== assignmentId || current.phase !== 'preparing') return;
+    if (!current || current.assignment.id !== assignmentId || current.phase !== 'preparing') {
+      throw new Error('assignment is no longer preparing');
+    }
     try {
       const remaining = Math.max(1, HARD_ASSIGNMENT_TIMEOUT_MS - (Date.now() - current.acceptedAt));
       const sent = await injectPrompt(current.assignment.prompt, remaining);
-      if (!active || active.assignment.id !== assignmentId || active.phase !== 'preparing') return;
+      if (!active || active.assignment.id !== assignmentId || active.phase !== 'preparing') {
+        throw new Error('assignment ownership changed during pre-send preparation');
+      }
 
       latestAssistantNodeCache = null;
       active.phase = 'running';
@@ -1062,9 +1133,15 @@
       active.lastProgressAt = sent.sentAt;
       active.textDirty = true;
       startMonitor();
+      return { assignmentId, phase: 'running', submissionProven: sent.submissionProven === true };
     } catch (error) {
-      if (!active || active.assignment.id !== assignmentId) return;
-      await cancelCurrent(AUTO_RECOVERY_REASON_PREFIX + 'pre-send preparation failed: ' + String(error));
+      if (active?.assignment.id === assignmentId) {
+        const recoveryReason = error?.code === SUBMISSION_UNPROVEN_AFTER_CLICK_CODE
+          ? AMBIGUOUS_POST_SEND_RECOVERY_PREFIX + ' ' + String(error)
+          : 'pre-send preparation failed: ' + String(error);
+        await cancelCurrent(AUTO_RECOVERY_REASON_PREFIX + recoveryReason);
+      }
+      throw error;
     }
   }
 
@@ -1149,10 +1226,7 @@
     registered = true;
     startHeartbeat();
     armHardAssignmentTimeout();
-    prepareAndSendActive(assignment.id).catch((error) => {
-      console.warn('[model-fleet] assignment preparation failed', error);
-    });
-    return { assignmentId: assignment.id, phase: 'preparing' };
+    return prepareAndSendActive(assignment.id);
   }
 
   async function cancelCurrent(reason = 'cancelled', expectedAssignmentId) {
@@ -1277,7 +1351,12 @@
     if (message.type === 'fleet:execute-assignment') {
       executeAssignment(message.assignment)
         .then((result) => sendResponse({ ok: true, ...result }))
-        .catch((error) => sendResponse({ ok: false, error: String(error) }));
+        .catch((error) => sendResponse({
+          ok: false,
+          error: String(error),
+          errorCode: String(error?.code || ''),
+          unsafeToRetry: error?.code === SUBMISSION_UNPROVEN_AFTER_CLICK_CODE,
+        }));
       return true;
     }
 

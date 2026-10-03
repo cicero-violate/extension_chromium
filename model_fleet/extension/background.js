@@ -20,12 +20,15 @@ const MAX_CONTROL_NOTICES = 32;
 const WORKER_BUSY_FRESH_MS = 30000;
 const HEARTBEAT_FLUSH_MS = 10000;
 const WORKER_WAKE_TIMEOUT_MS = 20000;
+const WORKER_DISPATCH_ACK_TIMEOUT_MS = 16 * 60 * 1000;
 const WORKER_BRIDGE_RETRY_MS = 250;
 const FLEET_PAGE_BUSY_RECHECK_MS = 5000;
 const MAX_AUTO_RECOVERY_ATTEMPTS = 1;
 const MAX_PROTOCOL_REPAIR_ATTEMPTS = 1;
 const MAX_TURNS_PER_CHAT = 10;
 const AUTO_RECOVERY_REASON_PREFIX = 'auto-recovery: ';
+const AMBIGUOUS_POST_SEND_RECOVERY_PREFIX = 'post-send submission unproven:';
+const SUBMISSION_UNPROVEN_AFTER_CLICK_CODE = 'FLEET_SUBMISSION_UNPROVEN_AFTER_CLICK';
 const LEGACY_SLEEP_PAGE_URL = chrome.runtime.getURL('sleep.html');
 const WARM_IDLE_ALARM_PREFIX = 'model-fleet:warm-idle:';
 const DEFAULT_WARM_IDLE_MS = 60000;
@@ -159,6 +162,21 @@ function now() {
 
 function iso(ts = now()) {
   return new Date(ts).toISOString();
+}
+
+function workerDispatchResponseError(response) {
+  const error = new Error(response?.error || 'worker did not prove prompt submission');
+  const ambiguousPostSend = response?.unsafeToRetry === true
+    || response?.errorCode === SUBMISSION_UNPROVEN_AFTER_CLICK_CODE;
+  if (ambiguousPostSend) {
+    error.code = SUBMISSION_UNPROVEN_AFTER_CLICK_CODE;
+    error.unsafeToRetry = true;
+  }
+  return error;
+}
+
+function ambiguousPostSendDispatchError(error) {
+  return error?.unsafeToRetry === true || error?.code === SUBMISSION_UNPROVEN_AFTER_CLICK_CODE;
 }
 
 function tabStateKey(tabId) {
@@ -2540,10 +2558,26 @@ function chooseDispatches(state) {
 
 async function failDispatch(dispatch, error) {
   const errorText = String(error);
+  const ambiguousPostSend = ambiguousPostSendDispatchError(error);
   const { result } = await mutateFleet((state) => {
     const worker = state.workers[dispatch.workerId];
     const blockWorker = !state.policy.paused && state.policy.authorityEnabled;
     let failedMessageIds = [];
+    if (ambiguousPostSend && worker?.currentAssignmentId === dispatch.assignment.id) {
+      const reason = AUTO_RECOVERY_REASON_PREFIX + AMBIGUOUS_POST_SEND_RECOVERY_PREFIX + ' ' + errorText;
+      const released = releaseWorkerAssignment(state, dispatch.workerId, dispatch.assignment.id, reason, {
+        requeue: false,
+        eventType: 'assignment.recovery_exhausted',
+        terminalStatus: 'blocked',
+      });
+      appendJournal(state, 'dispatch.failed', dispatch.assignment.id + ' failed unsafe-to-retry: ' + errorText, {
+        error: errorText,
+        workerBlocked: false,
+        submissionUncertainBlocked: !!released,
+        messageIds: released?.messageIds || [],
+      });
+      return { workerBlocked: false, submissionUncertainBlocked: !!released };
+    }
     if (worker?.currentAssignmentId === dispatch.assignment.id) {
       if (dispatch.assignment.kind === 'message') {
         failedMessageIds = requeueAssignmentMessages(state, worker, dispatch.assignment.id, 'target worker blocked after dispatch failure: ' + errorText);
@@ -2667,9 +2701,9 @@ async function dispatchReserved(dispatch) {
         type: 'fleet:execute-assignment',
         assignment: dispatch.assignment,
       }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('worker dispatch acknowledgement timeout')), 10000)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('worker dispatch acknowledgement timeout')), WORKER_DISPATCH_ACK_TIMEOUT_MS)),
     ]);
-    if (!response?.ok) throw new Error(response?.error || 'worker rejected assignment');
+    if (!response?.ok || response?.submissionProven !== true) throw workerDispatchResponseError(response);
     await mutateFleet((state) => {
       const worker = state.workers[dispatch.workerId];
       if (worker?.currentAssignmentId === dispatch.assignment.id) {
@@ -3960,8 +3994,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           .filter((notice) => assignmentControlNoticeIds(worker).includes(notice.id));
         const items = taskItem ? [taskItem] : (messageItems.length ? messageItems : controlItems);
         const used = items.reduce((max, item) => Math.max(max, Number(item?.autoRecoveryAttempts || 0)), 0);
-        requeue = used < MAX_AUTO_RECOVERY_ATTEMPTS;
         const recoveryReason = reason.slice(AUTO_RECOVERY_REASON_PREFIX.length);
+        const ambiguousPostSend = recoveryReason.startsWith(AMBIGUOUS_POST_SEND_RECOVERY_PREFIX);
+        requeue = used < MAX_AUTO_RECOVERY_ATTEMPTS;
+        if (ambiguousPostSend) requeue = false;
         for (const item of items) {
           item.lastAutoRecoveryReason = recoveryReason;
           if (requeue) item.autoRecoveryAttempts = used + 1;
@@ -4025,12 +4061,17 @@ function c6ExactReceipt(worker, assignmentId, reason, tabId) {
 function c6Journal(state, type, text, detail, at) {
   return globalThis.ModelFleetStateM7C3.appendJournal(state, type, text, detail, at);
 }
-function c6ApplyCancellationInState(state, workerId, assignmentId, reason, at, tabId, { allowHistoricalReceipt = false } = {}) {
+function c6ApplyCancellationInState(state, workerId, assignmentId, reason, at, tabId, {
+  allowHistoricalReceipt = false,
+  requireTabBinding = true,
+} = {}) {
   const worker = state.workers[workerId];
   if (!worker) return { result: { ok: false, code: 'worker-not-found', terminal: true, assignmentId } };
   if (allowHistoricalReceipt && c6ExactReceipt(worker, assignmentId, reason, tabId)) return { result: { ok: true, idempotent: true, released: false, assignmentId, disposition: worker.lastCancellationDisposition || 'released' } };
-  const reboundWorkerId = workerIdForTabInState(state, tabId);
-  if (reboundWorkerId !== workerId || worker.tabId !== tabId) return { result: { ok: false, code: 'stale-tab-rebound', terminal: true, assignmentId, tabId } };
+  if (requireTabBinding) {
+    const reboundWorkerId = workerIdForTabInState(state, tabId);
+    if (reboundWorkerId !== workerId || worker.tabId !== tabId) return { result: { ok: false, code: 'stale-tab-rebound', terminal: true, assignmentId, tabId } };
+  }
   if (worker.currentAssignmentId && worker.currentAssignmentId !== assignmentId) return { result: { ok: false, code: 'assignment_ownership_mismatch', terminal: false, expectedAssignmentId: worker.currentAssignmentId, reportedAssignmentId: assignmentId } };
   if (!worker.currentAssignmentId) {
     if (c6ExactReceipt(worker, assignmentId, reason, tabId)) return { result: { ok: true, idempotent: true, released: false, assignmentId, disposition: worker.lastCancellationDisposition || 'released' } };
@@ -4426,9 +4467,9 @@ async function dispatchReservedC3Candidate(dispatch) {
     if (!sendAuthorization.ok) throw new Error(`M7 C3 stale-before-send: ${sendAuthorization.reason}`);
     const response = await Promise.race([
       chrome.tabs.sendMessage(dispatch.tabId, { type: 'fleet:execute-assignment', assignment: dispatch.assignment }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('worker dispatch acknowledgement timeout')), 10000)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('worker dispatch acknowledgement timeout')), WORKER_DISPATCH_ACK_TIMEOUT_MS)),
     ]);
-    if (!response?.ok) throw new Error(response?.error || 'worker rejected assignment');
+    if (!response?.ok || response?.submissionProven !== true) throw workerDispatchResponseError(response);
     const acceptedAt = now();
     await mutateFleet((state) => {
       const authorization = c3.authorizeDispatch(state, dispatch);
@@ -4476,6 +4517,19 @@ async function dispatchReservedC3Candidate(dispatch) {
         return;
       }
       const diagnosticError = String(error);
+      if (ambiguousPostSendDispatchError(error)) {
+        const reason = AUTO_RECOVERY_REASON_PREFIX + AMBIGUOUS_POST_SEND_RECOVERY_PREFIX + ' ' + diagnosticError;
+        c6ApplyCancellationInState(
+          state,
+          dispatch.workerId,
+          dispatch.assignment.id,
+          reason,
+          failureAt,
+          dispatch.tabId,
+          { requireTabBinding: false },
+        );
+        return;
+      }
       const typedFaultSource = error && typeof error.message === 'string' ? error.message : (typeof error === 'string' ? error : '');
       const typedFaultMessage = String(typedFaultSource || 'dispatch failed').slice(0, 2000);
       const result = c3.composeDispatchFailure(state, { workerId: dispatch.workerId, assignmentId: dispatch.assignment.id, at: failureAt, message: typedFaultMessage });

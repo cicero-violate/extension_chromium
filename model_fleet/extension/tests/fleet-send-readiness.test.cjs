@@ -5,40 +5,75 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const worker = fs.readFileSync(path.join(__dirname, '..', 'fleet-worker.js'), 'utf8');
+const root = path.join(__dirname, '..');
+const worker = fs.readFileSync(path.join(root, 'fleet-worker.js'), 'utf8');
+const background = fs.readFileSync(path.join(root, 'background.js'), 'utf8');
 
-test('assignment custody is acknowledged before waiting for the send button', () => {
+test('assignment acknowledgement is held until prompt submission is proven', () => {
   const start = worker.indexOf('async function executeAssignment(assignment)');
   const end = worker.indexOf('async function cancelCurrent', start);
   const block = worker.slice(start, end);
-  assert.match(block, /phase: 'preparing'/);
-  assert.match(block, /armHardAssignmentTimeout\(\)/);
-  assert.match(block, /prepareAndSendActive\(assignment\.id\)\.catch/);
-  assert.match(block, /return \{ assignmentId: assignment\.id, phase: 'preparing' \}/);
-  assert.doesNotMatch(block, /await injectPrompt/);
+  assert.ok(block.includes("phase: 'preparing'"));
+  assert.ok(block.includes('armHardAssignmentTimeout()'));
+  assert.ok(block.includes('return prepareAndSendActive(assignment.id)'));
+  assert.ok(!block.includes("return { assignmentId: assignment.id, phase: 'preparing' }"));
 });
 
-test('preparing assignment waits for send readiness for the remaining hard-time budget', () => {
+test('preparing assignment enters running only after injectPrompt returns submission proof', () => {
   const start = worker.indexOf('async function prepareAndSendActive');
-  const end = worker.indexOf('async function executeAssignment', start);
+  const end = worker.indexOf('async function recoverAssignment', start);
   const block = worker.slice(start, end);
-  assert.match(block, /HARD_ASSIGNMENT_TIMEOUT_MS - \(Date\.now\(\) - current\.acceptedAt\)/);
-  assert.match(block, /await injectPrompt\(current\.assignment\.prompt, remaining\)/);
-  assert.match(block, /active\.phase = 'running'/);
+  const inject = block.indexOf('const sent = await injectPrompt');
+  const running = block.indexOf("active.phase = 'running'");
+  const result = block.indexOf('submissionProven: sent.submissionProven === true');
+  assert.ok(inject >= 0);
+  assert.ok(running > inject);
+  assert.ok(result > running);
+});
+
+test('injectPrompt proves a new matching user turn after clicking Send', () => {
+  const start = worker.indexOf('async function injectPrompt(text, sendReadyTimeoutMs)');
+  const end = worker.indexOf('\n  function stopResponseMonitor', start);
+  const block = worker.slice(start, end);
+  const previous = block.indexOf('const previousUserTurn = latestUserTurnNode()');
+  const click = block.indexOf('sendButton.click()');
+  const proof = block.indexOf('await waitForPromptSubmission(text, previousUserTurn, proofTimeoutMs)');
+  const returned = block.indexOf('submissionProven: true');
+  assert.ok(previous >= 0);
+  assert.ok(click > previous);
+  assert.ok(proof > click);
+  assert.ok(returned > proof);
+  assert.ok(block.includes('no new matching user turn appeared'));
+});
+
+test('pre-send submission failure uses exactly one bounded fleet recovery cancellation and propagates failure', () => {
+  const start = worker.indexOf('async function prepareAndSendActive');
+  const end = worker.indexOf('async function recoverAssignment', start);
+  const block = worker.slice(start, end);
+  const cancelNeedle = 'cancelCurrent(AUTO_RECOVERY_REASON_PREFIX + recoveryReason)';
+  assert.equal(block.split(cancelNeedle).length - 1, 1);
+  assert.ok(block.includes('await cancelCurrent'));
+  assert.ok(block.includes('error?.code === SUBMISSION_UNPROVEN_AFTER_CLICK_CODE'));
+  assert.ok(block.includes('AMBIGUOUS_POST_SEND_RECOVERY_PREFIX'));
+  assert.ok(block.includes("'pre-send preparation failed: ' + String(error)"));
+  assert.ok(block.includes('throw error'));
+});
+
+test('background accepts dispatch only with explicit submission proof', () => {
+  assert.equal(background.split('response?.submissionProven !== true').length - 1, 2);
+  assert.equal(background.split('throw workerDispatchResponseError(response)').length - 1, 2);
+  assert.equal(background.split('worker did not prove prompt submission').length - 1, 1);
+  assert.ok(background.includes('const WORKER_DISPATCH_ACK_TIMEOUT_MS = 16 * 60 * 1000;'));
+  assert.equal(background.split("worker dispatch acknowledgement timeout')), WORKER_DISPATCH_ACK_TIMEOUT_MS").length - 1, 2);
 });
 
 test('there is no five-second fleet send-readiness timeout anymore', () => {
-  assert.doesNotMatch(worker, /SEND_READY_TIMEOUT_MS/);
-  assert.match(worker, /function waitForSendButton\(timeoutMs\)/);
-  assert.match(worker, /async function injectPrompt\(text, sendReadyTimeoutMs\)/);
-});
-
-test('pre-send failure uses the bounded fleet recovery path', () => {
-  assert.match(worker, /pre-send preparation failed:/);
-  assert.match(worker, /cancelCurrent\(AUTO_RECOVERY_REASON_PREFIX/);
+  assert.ok(!worker.includes('SEND_READY_TIMEOUT_MS'));
+  assert.ok(worker.includes('function waitForSendButton(timeoutMs)'));
+  assert.ok(worker.includes('async function injectPrompt(text, sendReadyTimeoutMs)'));
 });
 
 test('hard timeout covers both preparing and running phases', () => {
-  assert.match(worker, /const startedAt = Number\(active\.acceptedAt \|\| active\.sentAt \|\| Date\.now\(\)\)/);
-  assert.match(worker, /cancelCurrent\(AUTO_RECOVERY_REASON_PREFIX \+ 'hard 15-minute assignment limit exceeded'\)/);
+  assert.ok(worker.includes('const startedAt = Number(active.acceptedAt || active.sentAt || Date.now())'));
+  assert.ok(worker.includes("cancelCurrent(AUTO_RECOVERY_REASON_PREFIX + 'hard 15-minute assignment limit exceeded')"));
 });

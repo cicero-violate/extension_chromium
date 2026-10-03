@@ -47,7 +47,7 @@
   }
 
   function findPickerCard(document) {
-    const cards = [...document.querySelectorAll('button')].filter((button) => {
+    const cards = [...document.querySelectorAll('button,[role="menuitem"],[role="option"]')].filter((button) => {
       if (!usable(button, document) || !enabled(button)) return false;
       const label = `${button.getAttribute('aria-label') || ''} ${button.innerText || button.textContent || ''}`;
       return label.includes(CONNECTOR_NAME);

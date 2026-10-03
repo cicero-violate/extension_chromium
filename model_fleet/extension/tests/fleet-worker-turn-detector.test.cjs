@@ -35,6 +35,14 @@ test('streaming detection is scoped to the composer stop control', () => {
   assert.ok(!source.includes('document.querySelector("[data-testid=\\"stop-button\\"], button[aria-label*=\\"stop\\" i]")'));
 });
 
+test('plain composer submit id is accepted only when it is not a Stop control', () => {
+  const start = source.indexOf('function findSendButton');
+  const end = source.indexOf('function waitForComposer', start);
+  const block = source.slice(start, end);
+  assert.ok(block.includes("'#composer-submit-button'"));
+  assert.ok(block.includes('!isStopControl(button)'));
+});
+
 test('fleet worker composer adapter matches current ChatGPT textbox and ProseMirror contract', () => {
   assert.match(source, /\[contenteditable="true"\]\[role="textbox"\]/);
   assert.match(source, /\[role="textbox"\]\[aria-multiline="true"\]/);
