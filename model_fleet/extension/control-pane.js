@@ -455,8 +455,9 @@
       const activating = lifecycle === 'activating';
       const rotating = lifecycle === 'rotating';
       const stale = workerIsStale(worker) || age === null || age > HEARTBEAT_STALE_SECONDS;
-      const status = warmIdle ? 'warm' : rotating ? 'rotating' : activating ? 'waking' : stale ? 'offline' : workerStatus(worker, 'idle');
-      const statusClass = status === 'running' || status === 'waking' ? 'running' : status === 'blocked' || status === 'offline' ? 'blocked' : 'pending';
+      const turnHealth = worker.turnHealth || (worker.runtimeBusy === true ? 'busy' : 'idle');
+      const status = stale ? 'offline' : turnHealth === 'dead' ? 'dead' : turnHealth === 'stalled' ? 'stalled' : worker.availability === 'busy' || worker.runtimeBusy === true ? 'busy' : warmIdle ? 'warm' : rotating ? 'rotating' : activating ? 'waking' : workerStatus(worker, 'idle');
+      const statusClass = status === 'running' || status === 'waking' || status === 'busy' ? 'running' : status === 'blocked' || status === 'offline' || status === 'dead' || status === 'stalled' ? 'blocked' : 'pending';
       const assignment = workerAssignment(worker);
       const queue = snapshot?.diagnostics?.queueByWorker?.[worker.id] || {};
       const queuedCount = Math.max(0, Number(queue.queuedCount || 0));
@@ -501,8 +502,9 @@
       const activating = lifecycle === "activating";
       const rotating = lifecycle === "rotating";
       const stale = workerIsStale(worker) || age === null || age > HEARTBEAT_STALE_SECONDS;
-      const status = warmIdle ? "warm" : rotating ? "rotating" : activating ? "waking" : stale ? "offline" : workerStatus(worker, "idle");
-      const statusClass = status === "running" || status === "waking" ? "running" : status === "blocked" || status === "offline" ? "blocked" : "pending";
+      const turnHealth = worker.turnHealth || (worker.runtimeBusy === true ? "busy" : "idle");
+      const status = stale ? "offline" : turnHealth === "dead" ? "dead" : turnHealth === "stalled" ? "stalled" : worker.availability === "busy" || worker.runtimeBusy === true ? "busy" : warmIdle ? "warm" : rotating ? "rotating" : activating ? "waking" : workerStatus(worker, "idle");
+      const statusClass = status === "running" || status === "waking" || status === "busy" ? "running" : status === "blocked" || status === "offline" || status === "dead" || status === "stalled" ? "blocked" : "pending";
       const pill = root.querySelector(".topline .pill");
       if (pill) {
         pill.className = `pill ${statusClass}`;
@@ -685,20 +687,26 @@
       if (taskPhase(task) === 'pending' && task.workflowBlockReason) exceptions.push(`${task.id} workflow blocked: ${task.workflowBlockReason}`);
       else if (taskPhase(task) === 'pending' && !taskRunnable(task) && (task.waitingDependencyIds || task.dependencies || []).some((id) => snapshot.tasks?.[id]?.phase === 'blocked' || snapshot.tasks?.[id]?.status === 'blocked')) exceptions.push(`${task.id} waits on a blocked dependency`);
     }
-    els.exceptionCount.textContent = String(exceptions.length);
+    els.exceptionCount.textContent = String(exceptions.length) + ' current';
     els.exceptions.innerHTML = exceptions.length ? exceptions.map((text) => `<div class="exception"><strong>Attention</strong><div class="small">${escapeHtml(text)}</div></div>`).join('') : '<div class="empty">No current exceptions.</div>';
+    const history = (snapshot?.diagnostics?.issues || []).filter((issue) => issue && typeof issue === 'object');
+    const historical = history.filter((issue) => !['worker-offline', 'heartbeat-never', 'heartbeat-stale', 'task-blocked', 'task-workflow-blocked', 'policy-restricted'].includes(issue.code));
+    if (historical.length) {
+      els.exceptions.insertAdjacentHTML('beforeend', '<details class="diagnostic-disclosure" style="margin-top:9px"><summary>Historical audit (' + historical.length + ')</summary><div class="diagnostic-disclosure-body">' + historical.map((issue) => '<div class="event"><div class="event-text"><strong>' + escapeHtml(issue.code || 'issue') + '</strong> · ' + escapeHtml(issue.message || issue.reason || 'Recorded diagnostic') + '</div></div>').join('') + '</div></details>');
+    }
   }
 
   function render() {
     if (!snapshot) return;
     const list = workers();
-    const active = list.filter((worker) => worker.currentAssignmentId).length;
+    const active = list.filter((worker) => worker.currentAssignmentId || worker.availability === 'running' || worker.availability === 'busy' || worker.runtimeBusy === true).length;
     const runnable = tasks().filter(taskRunnable).length;
     const healthy = snapshot.policy.authorityEnabled && computeInvariants().every(([, ok]) => ok);
 
     els.healthText.textContent = healthy ? (snapshot.policy.paused ? 'Healthy · paused' : 'Healthy') : (snapshot.policy.authorityEnabled ? 'Attention required' : 'Authority revoked');
     els.healthDot.style.background = healthy ? 'var(--green)' : snapshot.policy.authorityEnabled ? 'var(--amber)' : 'var(--red)';
     els.goalInput.value = document.activeElement === els.goalInput ? els.goalInput.value : (snapshot.goal || '');
+    if (els.goalSummary) els.goalSummary.textContent = snapshot.goal || 'Not set';
     const live = list.filter((worker) => worker.enabled !== false && !workerIsStale(worker)).length;
     els.workerMetric.textContent = `${active} / ${live}`;
     els.taskMetric.textContent = String(runnable);

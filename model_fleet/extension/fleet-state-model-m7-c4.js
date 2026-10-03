@@ -51,6 +51,12 @@
     if (own(observation, 'title') && observation.title !== '' && typeof observation.title !== 'string') throw reject('invalid-heartbeat-title');
     if (own(observation, 'url') && observation.url !== '' && typeof observation.url !== 'string') throw reject('invalid-heartbeat-url');
     if (own(observation, 'windowId') && observation.windowId !== null && !Number.isInteger(observation.windowId)) throw reject('invalid-heartbeat-window-id');
+    if (own(observation, 'turnHealth') && !['idle', 'busy', 'stalled', 'dead'].includes(observation.turnHealth)) throw reject('invalid-heartbeat-turn-health');
+    for (const key of ['turnBusySince', 'turnLastProgressAt', 'turnStalledSince']) {
+      if (own(observation, key) && (!Number.isFinite(observation[key]) || observation[key] < 0)) throw reject('invalid-heartbeat-' + key);
+    }
+    if (observation.busy === false && own(observation, 'turnHealth') && observation.turnHealth !== 'idle') throw reject('idle-heartbeat-nonidle-turn-health');
+    if (['stalled', 'dead'].includes(observation.turnHealth) && observation.busy !== true) throw reject('turn-health-requires-busy');
   }
   function observationMetadata(next, worker, observation) {
     if (own(observation, 'title') && observation.title !== '') next.title = observation.title;
@@ -106,6 +112,10 @@
     if (own(observation, 'url') && observation.url !== '') metadata.url = observation.url;
     if (own(observation, 'windowId') && Number.isInteger(observation.windowId)) metadata.windowId = observation.windowId;
     const same = observation.observedAt === previous.lastHeartbeatAt && observation.busy === previous.busy && nextReported === previous.reportedAssignmentId
+      && (!own(observation, 'turnHealth') || observation.turnHealth === (previous.turnHealth || (previous.busy ? 'busy' : 'idle')))
+      && (!own(observation, 'turnBusySince') || observation.turnBusySince === Number(previous.turnBusySince || 0))
+      && (!own(observation, 'turnLastProgressAt') || observation.turnLastProgressAt === Number(previous.turnLastProgressAt || 0))
+      && (!own(observation, 'turnStalledSince') || observation.turnStalledSince === Number(previous.turnStalledSince || 0))
       && (!own(metadata, 'title') || metadata.title === worker.title) && (!own(metadata, 'url') || metadata.url === worker.url) && (!own(metadata, 'windowId') || metadata.windowId === worker.windowId);
     if (observation.observedAt === previous.lastHeartbeatAt && !same) throw reject('conflicting-same-time-observation');
     const record = assignment(source, observation.workerId).assignment;
@@ -113,7 +123,17 @@
     if (observation.hasAssignmentIdentity && reported != null && record?.phase === 'reserved') return { state: source, result: { accepted: false, reason: 'claim-before-acceptance', faultIntent: { code: 'm4-custody-contradiction', source: 'heartbeat', reason: 'claim-before-acceptance', workerId: observation.workerId, observedAt: observation.observedAt, hasAssignmentIdentity: true, expectedAssignmentId: record.id, reportedAssignmentId: reported, assignmentId: record.id }, m4Reconciliation: clone(observation) } };
     if (same) return { state: source, result: { accepted: true, idempotent: true, reason: 'duplicate-observation', m4Reconciliation: clone(observation) } };
     const next = clone(source); const target = next.workers[observation.workerId];
-    target.runtime.lastHeartbeatAt = observation.observedAt; target.runtime.busy = observation.busy; target.runtime.reportedAssignmentId = nextReported; observationMetadata(target, worker, metadata);
+    target.runtime.lastHeartbeatAt = observation.observedAt; target.runtime.busy = observation.busy; target.runtime.reportedAssignmentId = nextReported;
+    target.runtime.turnHealth = own(observation, 'turnHealth') ? observation.turnHealth : (observation.busy ? 'busy' : 'idle');
+    target.runtime.turnBusySince = own(observation, 'turnBusySince') ? observation.turnBusySince : (observation.busy ? Number(previous.turnBusySince || observation.observedAt) : 0);
+    target.runtime.turnLastProgressAt = own(observation, 'turnLastProgressAt') ? observation.turnLastProgressAt : (observation.busy ? Number(previous.turnLastProgressAt || observation.observedAt) : 0);
+    target.runtime.turnStalledSince = own(observation, 'turnStalledSince') ? observation.turnStalledSince : 0;
+    if (observation.busy === false) {
+      target.runtime.turnRecoveryAttempts = 0;
+      target.runtime.turnRecoveryAt = 0;
+      target.runtime.turnRecoveryBusySince = 0;
+    }
+    observationMetadata(target, worker, metadata);
     const pageContradiction = observation.hasAssignmentIdentity && reported != null && !record;
     const result = { accepted: true, reason: pageContradiction ? 'contradictory-page-identity' : 'observation-recorded', faultIntent: pageContradiction ? { code: 'heartbeat-custody-mismatch', source: 'heartbeat', reason: 'contradictory-page-identity', workerId: observation.workerId, observedAt: observation.observedAt, hasAssignmentIdentity: true, expectedAssignmentId: null, reportedAssignmentId: reported, assignmentId: null } : null, m4Reconciliation: clone(observation) };
     return { state: finalize(next), result };
@@ -158,6 +178,15 @@
     const source = normalize(state); const { worker, assignment: record } = assignment(source, input.workerId); const reported = input.hasAssignmentIdentity ? reportedValue(input) : undefined;
     if (!positive(input.observedAt)) throw reject('invalid-recovery-observed-at');
     let next = clone(source); next.workers[input.workerId].runtime.lastHeartbeatAt = Math.max(next.workers[input.workerId].runtime.lastHeartbeatAt, input.observedAt); if (own(input, 'busy')) next.workers[input.workerId].runtime.busy = input.busy; if (input.hasAssignmentIdentity) next.workers[input.workerId].runtime.reportedAssignmentId = reported;
+    if (own(input, 'turnHealth')) next.workers[input.workerId].runtime.turnHealth = input.turnHealth;
+    if (own(input, 'turnBusySince')) next.workers[input.workerId].runtime.turnBusySince = input.turnBusySince;
+    if (own(input, 'turnLastProgressAt')) next.workers[input.workerId].runtime.turnLastProgressAt = input.turnLastProgressAt;
+    if (own(input, 'turnStalledSince')) next.workers[input.workerId].runtime.turnStalledSince = input.turnStalledSince;
+    if (input.busy === false) {
+      next.workers[input.workerId].runtime.turnRecoveryAttempts = 0;
+      next.workers[input.workerId].runtime.turnRecoveryAt = 0;
+      next.workers[input.workerId].runtime.turnRecoveryBusySince = 0;
+    }
     if (!record && reported != null) return { state: source, result: { ok: false, code: 'assignment_ownership_mismatch', terminal: true, expectedAssignmentId: null, reportedAssignmentId: reported } };
     if (!record) return { state: finalize(next), result: { ok: true, terminal: true, outcome: 'no-owner', reportedAssignmentId: null } };
     if (reported != null && reported !== record.id) return { state: source, result: { ok: false, code: 'assignment_ownership_mismatch', terminal: false, expectedAssignmentId: record.id, reportedAssignmentId: reported } };

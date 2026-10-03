@@ -4573,6 +4573,80 @@ const flushWorkerHeartbeatsC3Legacy = flushWorkerHeartbeats;
 const updateWorkerHeartbeatC3Legacy = updateWorkerHeartbeat;
 const reconcileOnHelloC3Legacy = reconcileOnHello;
 const recoverRegisteredWorkerBridgeC3Legacy = recoverRegisteredWorkerBridge;
+const DEAD_ORPHAN_TURN_RECOVERY_MAX_ATTEMPTS = 1;
+const deadOrphanTurnRecoveryPromises = new Map();
+
+async function recoverDeadOrphanTurnV2(workerId) {
+  if (deadOrphanTurnRecoveryPromises.has(workerId)) return deadOrphanTurnRecoveryPromises.get(workerId);
+  const operation = (async () => {
+    const claimedAt = now();
+    const claimed = await mutateFleet((state) => {
+      if (state.version !== 2) return null;
+      const worker = state.workers[workerId];
+      if (!worker?.enabled || !Number.isInteger(worker.tabId) || worker.currentAssignmentId != null) return null;
+      const runtime = worker.runtime || {};
+      const attempts = Math.max(0, Math.trunc(Number(runtime.turnRecoveryAttempts || 0)));
+      if (runtime.busy !== true || runtime.turnHealth !== 'dead' || attempts >= DEAD_ORPHAN_TURN_RECOVERY_MAX_ATTEMPTS) return null;
+      let next = globalThis.ModelFleetStateM7C3.appendJournal(state, 'worker.dead_turn_recovery_started', `${workerId} automatic DEAD orphan turn recovery started`, {
+        workerId,
+        tabId: worker.tabId,
+        attempt: attempts + 1,
+        turnBusySince: Number(runtime.turnBusySince || 0),
+        turnLastProgressAt: Number(runtime.turnLastProgressAt || 0),
+      }, claimedAt);
+      const target = next.workers[workerId];
+      target.runtime.turnRecoveryAttempts = attempts + 1;
+      target.runtime.turnRecoveryAt = claimedAt;
+      target.runtime.turnRecoveryBusySince = Number(runtime.turnBusySince || 0);
+      replaceC3State(state, next);
+      return { tabId: target.tabId, attempt: attempts + 1, turnBusySince: target.runtime.turnRecoveryBusySince };
+    });
+    if (!claimed.result) return { workerId, recovered: false, skipped: true };
+    const { tabId, attempt, turnBusySince } = claimed.result;
+    try {
+      await chrome.tabs.reload(tabId);
+      await waitForTabReady(tabId);
+      const bridgeRecovery = await recoverRegisteredWorkerBridge(workerId, 'dead-turn automatic recovery');
+      const settledAt = now();
+      const settled = await mutateFleet((state) => {
+        const worker = state.workers[workerId];
+        let next = globalThis.ModelFleetStateM7C3.appendJournal(state, 'worker.dead_turn_recovery_reloaded', `${workerId} DEAD orphan turn tab reloaded`, {
+          workerId,
+          tabId,
+          attempt,
+          turnBusySince,
+          bridgeRecovered: bridgeRecovery?.recovered === true,
+        }, settledAt);
+        const current = next.workers[workerId];
+        const idle = !!current && current.currentAssignmentId == null && current.runtime?.busy === false;
+        if (idle) {
+          next.lastGoalContinuationKey = '';
+          next = globalThis.ModelFleetStateM7C3.appendJournal(next, 'worker.dead_turn_recovery_ready', `${workerId} recovered idle; Coordinator reconciliation enabled`, { workerId, tabId, attempt }, settledAt);
+        }
+        replaceC3State(state, next);
+        return { idle };
+      });
+      if (settled.result?.idle) schedule().catch(() => {});
+      return { workerId, recovered: true, idle: settled.result?.idle === true, attempt };
+    } catch (error) {
+      const failedAt = now();
+      await mutateFleet((state) => {
+        if (!state.workers[workerId]) return null;
+        const next = globalThis.ModelFleetStateM7C3.appendJournal(state, 'worker.dead_turn_recovery_failed', `${workerId} automatic DEAD orphan turn recovery failed`, { workerId, tabId, attempt, error: String(error) }, failedAt);
+        replaceC3State(state, next);
+        return { failed: true };
+      }).catch(() => {});
+      return { workerId, recovered: false, failed: true, attempt, error: String(error) };
+    }
+  })();
+  deadOrphanTurnRecoveryPromises.set(workerId, operation);
+  try {
+    return await operation;
+  } finally {
+    deadOrphanTurnRecoveryPromises.delete(workerId);
+  }
+}
+
 function c4HeartbeatObservation(workerId, heartbeat) {
   const hasAssignmentIdentity = Object.prototype.hasOwnProperty.call(heartbeat, 'activeAssignmentId');
   const observation = {
@@ -4582,7 +4656,7 @@ function c4HeartbeatObservation(workerId, heartbeat) {
     hasAssignmentIdentity,
   };
   if (hasAssignmentIdentity) observation.reportedAssignmentId = heartbeat.activeAssignmentId;
-  for (const key of ['title', 'url', 'windowId']) if (Object.prototype.hasOwnProperty.call(heartbeat, key)) observation[key] = heartbeat[key];
+  for (const key of ['title', 'url', 'windowId', 'turnHealth', 'turnBusySince', 'turnLastProgressAt', 'turnStalledSince']) if (Object.prototype.hasOwnProperty.call(heartbeat, key)) observation[key] = heartbeat[key];
   return observation;
 }
 flushWorkerHeartbeats = async function flushWorkerHeartbeatsC4() {
@@ -4601,8 +4675,36 @@ flushWorkerHeartbeats = async function flushWorkerHeartbeatsC4() {
         const result = globalThis.ModelFleetStateM7C4.processHeartbeat(next, c4HeartbeatObservation(workerId, heartbeat));
         next = result.state;
         const after = next.workers[workerId];
-        scheduleNeeded = scheduleNeeded || result.result.scheduleNeeded === true
-          || (before.runtime.busy === true && after?.runtime.busy === false && after.currentAssignmentId == null);
+        const beforeTurnHealth = before.runtime.turnHealth || (before.runtime.busy ? 'busy' : 'idle');
+        const afterTurnHealth = after.runtime.turnHealth || (after.runtime.busy ? 'busy' : 'idle');
+        if (beforeTurnHealth !== afterTurnHealth && ['stalled', 'dead'].includes(afterTurnHealth)) {
+          const type = afterTurnHealth === 'dead' ? 'worker.turn_dead' : 'worker.turn_stalled';
+          const text = afterTurnHealth === 'dead'
+            ? workerId + ' ChatGPT turn has no page progress; resend/recovery required'
+            : workerId + ' ChatGPT turn has stopped making page progress';
+          next = globalThis.ModelFleetStateM7C3.appendJournal(next, type, text, {
+            workerId,
+            turnHealth: afterTurnHealth,
+            turnBusySince: Number(after.runtime.turnBusySince || 0),
+            turnLastProgressAt: Number(after.runtime.turnLastProgressAt || 0),
+            turnStalledSince: Number(after.runtime.turnStalledSince || 0),
+          }, heartbeat.at);
+        }
+        const unownedTurnQuiesced = before.runtime.busy === true
+          && after?.runtime.busy === false
+          && before.currentAssignmentId == null
+          && after.currentAssignmentId == null;
+        if (unownedTurnQuiesced) {
+          next.lastGoalContinuationKey = '';
+          next = globalThis.ModelFleetStateM7C3.appendJournal(
+            next,
+            'worker.unowned_turn_quiesced',
+            `${workerId} unowned ChatGPT turn became idle; goal continuation dedupe reset`,
+            { workerId },
+            heartbeat.at,
+          );
+        }
+        scheduleNeeded = scheduleNeeded || result.result.scheduleNeeded === true || unownedTurnQuiesced;
       }
       replaceC3State(state, next);
       return { scheduleNeeded };
@@ -4610,6 +4712,17 @@ flushWorkerHeartbeats = async function flushWorkerHeartbeatsC4() {
     for (const [workerId, heartbeat] of batch) {
       const current = liveHeartbeats.get(workerId);
       if (current && current.at <= heartbeat.at) liveHeartbeats.delete(workerId);
+    }
+    const deadRecoveryCandidates = Object.values(committed.state.workers || {})
+      .filter((worker) => worker?.enabled
+        && Number.isInteger(worker.tabId)
+        && worker.currentAssignmentId == null
+        && worker.runtime?.busy === true
+        && worker.runtime?.turnHealth === 'dead'
+        && Math.max(0, Math.trunc(Number(worker.runtime?.turnRecoveryAttempts || 0))) < DEAD_ORPHAN_TURN_RECOVERY_MAX_ATTEMPTS)
+      .map((worker) => worker.id);
+    for (const workerId of deadRecoveryCandidates) {
+      recoverDeadOrphanTurnV2(workerId).catch((error) => console.warn('[model-fleet] DEAD orphan turn recovery deferred', workerId, error));
     }
     lastHeartbeatFlushAt = now();
     return { state: committed.state, scheduleNeeded };
@@ -4630,6 +4743,9 @@ updateWorkerHeartbeat = async function updateWorkerHeartbeatC4(tab, payload) {
     url: tab.url || '',
     windowId: Number.isInteger(tab.windowId) ? tab.windowId : null,
   });
+  for (const key of ['turnHealth', 'turnBusySince', 'turnLastProgressAt', 'turnStalledSince']) {
+    if (Object.prototype.hasOwnProperty.call(payload, key)) liveHeartbeats.get(workerId)[key] = payload[key];
+  }
   if (Object.prototype.hasOwnProperty.call(payload, 'activeAssignmentId')) {
     liveHeartbeats.get(workerId).activeAssignmentId = (typeof payload.activeAssignmentId === 'string' ? payload.activeAssignmentId.trim() : '') || null;
   }
@@ -4657,17 +4773,33 @@ reconcileOnHello = async function reconcileOnHelloC4(tab, payload = {}) {
     };
     if (hasAssignmentIdentity) recoveryInput.reportedAssignmentId = (typeof payload.activeAssignmentId === 'string' ? payload.activeAssignmentId.trim() : '') || null;
     if (Object.prototype.hasOwnProperty.call(payload, 'busy')) recoveryInput.busy = payload.busy;
+    for (const key of ['turnHealth', 'turnBusySince', 'turnLastProgressAt', 'turnStalledSince']) {
+      if (Object.prototype.hasOwnProperty.call(payload, key)) recoveryInput[key] = payload[key];
+    }
     const result = globalThis.ModelFleetStateM7C4.reconcileRecoveryCustody(state, recoveryInput);
-    const next = result.state;
+    let next = result.state;
+    if (result.result.ok === true && ['reattached-running', 'reattached', 'completion-reattached', 'no-owner'].includes(result.result.outcome)) {
+      const cleared = globalThis.ModelFleetStateM7C4.clearFaultWithEvidence(next, workerId, {
+        success: true,
+        kind: 'm4-recovery',
+        workerId,
+        at: observedAt,
+        recoveryInput,
+        result: result.result,
+      });
+      scheduleAfterRecovery = cleared.result.cleared === true;
+      next = cleared.state;
+    }
     const worker = next.workers[workerId];
     worker.title = tab.title || worker.title;
     worker.url = tab.url || worker.url;
     if (Number.isInteger(tab.windowId)) worker.windowId = tab.windowId;
     replaceC3State(state, next);
     return result.result;
-  });
+  }, repairEvidence ? { repairEvidence } : undefined);
   const buffered = liveHeartbeats.get(workerId);
   if (buffered && buffered.at <= observedAt) liveHeartbeats.delete(workerId);
+  if (scheduleAfterRecovery) schedule().catch(() => {});
   return { registered: true, worker: committed.state.workers[workerId], recovery: committed.result };
 };
 recoverRegisteredWorkerBridge = async function recoverRegisteredWorkerBridgeC4(workerId, reason = 'extension context recovery') {
@@ -4681,8 +4813,17 @@ recoverRegisteredWorkerBridge = async function recoverRegisteredWorkerBridgeC4(w
   const assignmentRecord = assignment.assignment;
   await setFleetRecoveryHint(worker.tabId, assignmentRecord?.id || null);
   try {
-    await ensureFleetBridge(worker.tabId);
-    let response = { ok: true, assignmentId: assignmentRecord?.id || null, reattached: false };
+    const bridge = await ensureFleetBridge(worker.tabId);
+    let response = {
+      ok: true,
+      assignmentId: assignmentRecord?.id || null,
+      reattached: false,
+      busy: bridge?.busy === true,
+      turnHealth: bridge?.turnHealth,
+      turnBusySince: bridge?.turnBusySince,
+      turnLastProgressAt: bridge?.turnLastProgressAt,
+      turnStalledSince: bridge?.turnStalledSince,
+    };
     if (assignmentRecord) {
       let prompt = '';
       if (assignmentRecord.kind === 'task') prompt = buildTaskPromptV2(loaded, assignment.promptInputs, now());
@@ -4703,6 +4844,9 @@ recoverRegisteredWorkerBridge = async function recoverRegisteredWorkerBridgeC4(w
       };
       if (assignmentRecord) recoveryInput.reportedAssignmentId = typeof response.assignmentId === 'string' ? response.assignmentId : null;
       if (Object.prototype.hasOwnProperty.call(response, 'busy')) recoveryInput.busy = response.busy;
+      for (const key of ['turnHealth', 'turnBusySince', 'turnLastProgressAt', 'turnStalledSince']) {
+        if (response[key] !== undefined) recoveryInput[key] = response[key];
+      }
       const outcome = globalThis.ModelFleetStateM7C4.reconcileRecoveryCustody(state, recoveryInput);
       let next = outcome.state;
       if (outcome.result.ok === true && ['reattached-running', 'reattached', 'completion-reattached', 'no-owner'].includes(outcome.result.outcome)) {

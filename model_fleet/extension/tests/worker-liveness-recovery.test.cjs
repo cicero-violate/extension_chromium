@@ -104,3 +104,95 @@ test('scheduler initiates bounded recovery when pending work is blocked by stale
   assert.match(schedule, /!dispatches\.length && recoveryState/);
   assert.match(schedule, /maybeRecoverStaleDispatchBridgesV2\(recoveryState, now\(\)\)/);
 });
+
+test('recovered assignment uses the live assistant baseline', () => {
+  const start = workerSource.indexOf('async function recoverAssignment(assignment)');
+  const end = workerSource.indexOf('async function executeAssignment(assignment)', start);
+  const code = workerSource.slice(start, end);
+  assert.ok(code.includes('const baseline = latestAssistantSnapshot(true)'));
+  assert.ok(code.includes('baselineFingerprint: baseline.fingerprint'));
+  assert.ok(!code.includes('__fleet_context_recovery__'));
+});
+
+test('recovered response is bound after the latest matching user prompt', () => {
+  assert.ok(workerSource.includes('function assistantSnapshotFollowsLatestUserTurn'));
+  assert.ok(workerSource.includes('DOCUMENT_POSITION_FOLLOWING'));
+  assert.ok(workerSource.includes('function recoveredResponseBelongsToAssignment'));
+});
+
+test('Thinking shimmer counts as active ChatGPT response work', () => {
+  assert.ok(workerSource.includes('function hasActiveThinkingIndicator'));
+  assert.ok(workerSource.includes('cadencedShimmer'));
+  assert.ok(workerSource.includes('hasActiveStopControl() || hasActiveThinkingIndicator()'));
+});
+
+test('bridge recovery carries immediate page busy proof', () => {
+  assert.ok(workerSource.includes('sampleTurnLiveness()'));
+  assert.ok(background.includes('const bridge = await ensureFleetBridge(worker.tabId)'));
+  assert.ok(background.includes('busy: bridge?.busy === true'));
+});
+
+test('post-reload monitor requires recovered current-turn proof before completion', () => {
+  assert.ok(workerSource.includes('active.recoveredAfterExtensionReload && active.sawStreaming && !active.responseChanged'));
+  assert.ok(workerSource.includes('recoveredResponseBelongsToAssignment(active.assignment, recoveredSnapshot)'));
+});
+
+test('busy availability overrides preserved warm-idle display state', () => {
+  const c16 = fs.readFileSync(path.join(extensionDir, 'fleet-state-model-m7-c16.js'), 'utf8');
+  const displayStart = c16.indexOf('function displayStatus');
+  const displayEnd = c16.indexOf('function projectWorkerFromNormalized', displayStart);
+  const display = c16.slice(displayStart, displayEnd);
+  assert.ok(display.indexOf("worker.availability === 'busy'") < display.indexOf("worker.lifecycleDisplay === 'warm-idle'"));
+  assert.ok(display.includes("worker.availability === 'busy') return 'busy'"));
+});
+
+test('busy availability counts as active role occupancy', () => {
+  const c16 = fs.readFileSync(path.join(extensionDir, 'fleet-state-model-m7-c16.js'), 'utf8');
+  assert.ok(c16.includes("worker.availability === 'running' || worker.availability === 'busy'"));
+});
+
+test('control pane counts and renders unowned runtime busy workers as active BUSY', () => {
+  const pane = fs.readFileSync(path.join(extensionDir, 'control-pane.js'), 'utf8');
+  assert.ok(pane.includes("worker.currentAssignmentId || worker.availability === 'running' || worker.availability === 'busy' || worker.runtimeBusy === true"));
+  assert.ok(pane.includes("worker.availability === 'busy' || worker.runtimeBusy === true ? 'busy'"));
+  assert.ok(pane.includes("status === 'running' || status === 'waking' || status === 'busy'"));
+});
+
+test('unowned busy to idle transition resets continuation dedupe and schedules reconciliation', () => {
+  const start = background.indexOf('flushWorkerHeartbeats = async function flushWorkerHeartbeatsC4()');
+  const end = background.indexOf('updateWorkerHeartbeat = async function updateWorkerHeartbeatC4', start);
+  const code = background.slice(start, end);
+  assert.ok(code.includes('const unownedTurnQuiesced = before.runtime.busy === true'));
+  assert.ok(code.includes("next.lastGoalContinuationKey = ''"));
+  assert.ok(code.includes("'worker.unowned_turn_quiesced'"));
+  assert.ok(code.includes('scheduleNeeded = scheduleNeeded || result.result.scheduleNeeded === true || unownedTurnQuiesced'));
+});
+
+
+test('DEAD orphan recovery is bounded to one automatic reload and excludes owned assignments', () => {
+  assert.ok(background.includes('DEAD_ORPHAN_TURN_RECOVERY_MAX_ATTEMPTS = 1'));
+  assert.ok(background.includes('async function recoverDeadOrphanTurnV2(workerId)'));
+  assert.ok(background.includes('worker.currentAssignmentId != null'));
+  assert.ok(background.includes("runtime.turnHealth !== 'dead'"));
+  assert.ok(background.includes('attempts >= DEAD_ORPHAN_TURN_RECOVERY_MAX_ATTEMPTS'));
+  assert.ok(background.includes('await chrome.tabs.reload(tabId)'));
+});
+
+test('DEAD orphan recovery persists its attempt receipt and only re-enables continuation after idle proof', () => {
+  const c1 = fs.readFileSync(path.join(extensionDir, 'fleet-state-model-m7-c1.js'), 'utf8');
+  const c4 = fs.readFileSync(path.join(extensionDir, 'fleet-state-model-m7-c4.js'), 'utf8');
+  assert.ok(c1.includes('turnRecoveryAttempts'));
+  assert.ok(background.includes('target.runtime.turnRecoveryAttempts = attempts + 1'));
+  assert.ok(background.includes("'worker.dead_turn_recovery_started'"));
+  assert.ok(background.includes("'worker.dead_turn_recovery_reloaded'"));
+  assert.ok(background.includes("'worker.dead_turn_recovery_ready'"));
+  assert.ok(background.includes("next.lastGoalContinuationKey = ''"));
+  assert.ok(c4.includes('target.runtime.turnRecoveryAttempts = 0'));
+  assert.ok(c4.includes('next.workers[input.workerId].runtime.turnRecoveryAttempts = 0'));
+});
+
+test('DEAD orphan recovery is re-entered from heartbeat state, not a parallel timer', () => {
+  assert.ok(background.includes('const deadRecoveryCandidates = Object.values(committed.state.workers || {})'));
+  assert.ok(background.includes("worker.runtime?.turnHealth === 'dead'"));
+  assert.ok(background.includes('recoverDeadOrphanTurnV2(workerId).catch'));
+});

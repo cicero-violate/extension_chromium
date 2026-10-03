@@ -211,6 +211,20 @@
       && (typeof worker.runtime.reportedAssignmentId !== 'string' || !worker.runtime.reportedAssignmentId)) {
       throw blocked('invalid-runtime-reported-assignment');
     }
+    if (Object.prototype.hasOwnProperty.call(worker.runtime, 'turnHealth')
+      && !['idle', 'busy', 'stalled', 'dead'].includes(worker.runtime.turnHealth)) {
+      throw blocked('invalid-runtime-turn-health');
+    }
+    for (const key of ['turnBusySince', 'turnLastProgressAt', 'turnStalledSince', 'turnRecoveryAt', 'turnRecoveryBusySince']) {
+      if (Object.prototype.hasOwnProperty.call(worker.runtime, key)
+        && (!Number.isFinite(worker.runtime[key]) || worker.runtime[key] < 0)) {
+        throw blocked('invalid-runtime-' + key);
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(worker.runtime, 'turnRecoveryAttempts')
+      && (!Number.isInteger(worker.runtime.turnRecoveryAttempts) || worker.runtime.turnRecoveryAttempts < 0 || worker.runtime.turnRecoveryAttempts > 1)) {
+      throw blocked('invalid-runtime-turn-recovery-attempts');
+    }
   }
 
   function assertFault(worker) {

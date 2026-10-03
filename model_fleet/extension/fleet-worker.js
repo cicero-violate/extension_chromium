@@ -17,6 +17,11 @@
   const AUTO_RECOVERY_REASON_PREFIX = 'auto-recovery: ';
   const COMPLETION_HANDOFF_ID = '__model_fleet_completion_handoff__';
   const ASSIGNMENT_RECOVERY_HINT_ID = '__model_fleet_assignment_recovery__';
+  const TURN_LIVENESS_ID = '__model_fleet_turn_liveness__';
+  const ORPHAN_TURN_STALLED_MS = 2 * 60 * 1000;
+  const ORPHAN_TURN_DEAD_MS = 5 * 60 * 1000;
+  const OWNED_TURN_STALLED_MS = 5 * 60 * 1000;
+  const OWNED_TURN_DEAD_MS = 15 * 60 * 1000;
 
   let registered = false;
   let registeredWorkerId = null;
@@ -80,11 +85,17 @@
     return normalizeFleetProtocolSource(text).replace(/\s+/g, ' ').trim();
   }
 
+  function latestUserTurnNode() {
+    const candidates = document.querySelectorAll(
+      '[data-message-author-role="user"], [class~="group/user-message"], .user-message',
+    );
+    return candidates[candidates.length - 1] || null;
+  }
+
   function latestUserTurnText() {
-    const candidates = [
-      ...document.querySelectorAll('[data-message-author-role="user"]'),
-      ...document.querySelectorAll('.user-message'),
-    ];
+    const candidates = document.querySelectorAll(
+      '[data-message-author-role="user"], [class~="group/user-message"], .user-message',
+    );
     const node = candidates[candidates.length - 1] || null;
     return String(node?.innerText || node?.textContent || '').trim();
   }
@@ -171,8 +182,97 @@
     return !!stopButton && usable(stopButton) && enabledButton(stopButton);
   }
 
+  function hasActiveThinkingIndicator() {
+    return [...document.querySelectorAll('[class*="cadencedShimmer"]')].some((node) => (
+      usable(node) && /^thinking(?:\u2026|\.{3})?$/i.test(String(node.innerText || node.textContent || '').trim())
+    ));
+  }
+
   function isStreaming() {
-    return hasActiveStopControl();
+    return hasActiveStopControl() || hasActiveThinkingIndicator();
+  }
+
+  function turnLivenessNode(create = false) {
+    let node = document.getElementById(TURN_LIVENESS_ID);
+    if (!node && create && document.documentElement) {
+      node = document.createElement('meta');
+      node.id = TURN_LIVENESS_ID;
+      node.hidden = true;
+      node.setAttribute('data-model-fleet-turn-liveness', '1');
+      document.documentElement.appendChild(node);
+    }
+    return node;
+  }
+
+  function readTurnLivenessState() {
+    const raw = turnLivenessNode(false)?.getAttribute('data-payload');
+    if (!raw) return null;
+    try {
+      const value = JSON.parse(raw);
+      return value && typeof value === 'object' ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function latestTurnProgressText() {
+    const thinking = [...document.querySelectorAll('[class*="cadencedShimmer"]')].find((node) => (
+      usable(node) && /^thinking(?:\u2026|\.{3})?$/i.test(String(node.innerText || node.textContent || '').trim())
+    ));
+    let current = thinking;
+    while (current && current !== document.body) {
+      const text = String(current.innerText || current.textContent || '').replace(/\s+/g, ' ').trim();
+      if (text.length >= 120) return text;
+      current = current.parentElement;
+    }
+    const turns = [...document.querySelectorAll('[data-testid^="conversation-turn-"]')];
+    const node = turns[turns.length - 1] || latestAssistantNode(true) || latestUserTurnNode();
+    return String(node?.innerText || node?.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function sampleTurnLiveness() {
+    const observedAt = Date.now();
+    const busy = !!active || !!pendingCompletion || isStreaming();
+    if (!busy) {
+      turnLivenessNode(false)?.remove();
+      return {
+        busy: false,
+        turnHealth: 'idle',
+        turnBusySince: 0,
+        turnLastProgressAt: 0,
+        turnStalledSince: 0,
+      };
+    }
+
+    const fingerprintNow = fingerprint(latestTurnProgressText());
+    const previous = readTurnLivenessState();
+    const sameBusyEpoch = previous && Number(previous.turnBusySince) > 0;
+    const turnBusySince = sameBusyEpoch ? Number(previous.turnBusySince) : observedAt;
+    const progressed = !previous || previous.fingerprint !== fingerprintNow;
+    const turnLastProgressAt = progressed
+      ? observedAt
+      : Math.max(turnBusySince, Number(previous.turnLastProgressAt) || turnBusySince);
+    const orphaned = !active && !pendingCompletion;
+    const stalledAfter = orphaned ? ORPHAN_TURN_STALLED_MS : OWNED_TURN_STALLED_MS;
+    const deadAfter = orphaned ? ORPHAN_TURN_DEAD_MS : OWNED_TURN_DEAD_MS;
+    const quietFor = Math.max(0, observedAt - turnLastProgressAt);
+    const turnHealth = quietFor >= deadAfter ? 'dead' : quietFor >= stalledAfter ? 'stalled' : 'busy';
+    const turnStalledSince = turnHealth === 'busy'
+      ? 0
+      : (previous?.turnHealth === 'stalled' || previous?.turnHealth === 'dead')
+        ? Math.max(turnLastProgressAt, Number(previous.turnStalledSince) || observedAt)
+        : observedAt;
+    const payload = {
+      fingerprint: fingerprintNow,
+      turnHealth,
+      turnBusySince,
+      turnLastProgressAt,
+      turnStalledSince,
+      orphaned,
+      observedAt,
+    };
+    turnLivenessNode(true)?.setAttribute('data-payload', JSON.stringify(payload));
+    return { busy: true, turnHealth, turnBusySince, turnLastProgressAt, turnStalledSince };
   }
 
   function findComposer() {
@@ -531,6 +631,23 @@
     };
   }
 
+  function assistantSnapshotFollowsLatestUserTurn(snapshot) {
+    const user = latestUserTurnNode();
+    const assistant = snapshot?.node || null;
+    if (!user || !assistant || user === assistant) return false;
+    try {
+      return (user.compareDocumentPosition(assistant) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    } catch {
+      return false;
+    }
+  }
+
+  function recoveredResponseBelongsToAssignment(assignment, snapshot) {
+    return assignmentPromptObserved(assignment)
+      && assistantSnapshotFollowsLatestUserTurn(snapshot)
+      && String(snapshot?.text || '').trim().length > 0;
+  }
+
   function hideTransportResponse(text) {
     const source = normalizeFleetProtocolSource(text);
     if (!/\[\s*FLEET_MESSAGE\b/i.test(source)) return false;
@@ -874,11 +991,22 @@
       }
     }
 
-    // Never release the worker while ChatGPT still exposes the active Stop
-    // control. Long tool/model turns can legitimately remain active for many
-    // minutes; completing here would allow a second fleet message to collide
-    // with the still-running turn.
+    // Never release the worker while ChatGPT still exposes an active response
+    // signal (Stop control or Thinking shimmer). Long tool/model turns can
+    // legitimately remain active for many minutes.
     if (streaming) return;
+
+    if (active.recoveredAfterExtensionReload && active.sawStreaming && !active.responseChanged) {
+      const recoveredSnapshot = latestAssistantSnapshot(true);
+      if (recoveredResponseBelongsToAssignment(active.assignment, recoveredSnapshot)) {
+        active.lastFingerprint = recoveredSnapshot.fingerprint;
+        active.lastText = recoveredSnapshot.text;
+        active.lastChangeAt = nowAt;
+        active.lastProgressAt = nowAt;
+        active.responseChanged = true;
+        active.explicitTerminal = hasFleetTerminalMarker(recoveredSnapshot.text);
+      }
+    }
 
     const quietFor = nowAt - active.lastChangeAt;
     if (active.responseChanged && active.explicitTerminal) {
@@ -947,20 +1075,22 @@
     }
 
     const attachedAt = Date.now();
+    const baseline = latestAssistantSnapshot(true);
+    const currentResponseProven = !streaming && recoveredResponseBelongsToAssignment(assignment, baseline);
     active = {
       assignment,
       phase: 'running',
       acceptedAt: Number(assignment.startedAt || attachedAt),
       sentAt: Number(assignment.startedAt || attachedAt),
-      baselineFingerprint: '__fleet_context_recovery__',
-      lastFingerprint: '',
-      lastText: '',
+      baselineFingerprint: baseline.fingerprint,
+      lastFingerprint: baseline.fingerprint,
+      lastText: baseline.text,
       lastChangeAt: attachedAt,
       lastProgressAt: attachedAt,
       sawStreaming: streaming,
       textDirty: true,
-      responseChanged: false,
-      explicitTerminal: false,
+      responseChanged: currentResponseProven,
+      explicitTerminal: currentResponseProven && hasFleetTerminalMarker(baseline.text),
       recoveredAfterExtensionReload: true,
     };
     registered = true;
@@ -1077,9 +1207,10 @@
       if (!recovered || pendingCompletion) return;
     }
     try {
+      const liveness = sampleTurnLiveness();
       const response = await runtimeMessage({
         type: 'fleet:worker-heartbeat',
-        busy: !!active || !!pendingCompletion || isStreaming(),
+        ...liveness,
         activeAssignmentId: active?.assignment.id || pendingCompletion?.assignmentId || null,
         title: document.title,
         url: location.href,
@@ -1108,13 +1239,17 @@
     if (!message || typeof message.type !== 'string') return false;
 
     if (message.type === 'fleet:bridge-ping') {
-      sendResponse({ ok: true, registered, registeredWorkerId, activeAssignmentId: active?.assignment.id || pendingCompletion?.assignmentId || null });
+      const liveness = sampleTurnLiveness();
+      sendResponse({ ok: true, registered, registeredWorkerId, ...liveness, activeAssignmentId: active?.assignment.id || pendingCompletion?.assignmentId || null });
       return false;
     }
 
     if (message.type === 'fleet:ensure-registration') {
       ensureRegistered(true)
-        .then((ok) => sendResponse({ ok, registered, registeredWorkerId, activeAssignmentId: active?.assignment.id || pendingCompletion?.assignmentId || null }))
+        .then((ok) => {
+          const liveness = sampleTurnLiveness();
+          sendResponse({ ok, registered, registeredWorkerId, ...liveness, activeAssignmentId: active?.assignment.id || pendingCompletion?.assignmentId || null });
+        })
         .catch((error) => sendResponse({ ok: false, registered: false, error: String(error) }));
       return true;
     }
@@ -1175,8 +1310,10 @@
 
   async function hello() {
     try {
+      const liveness = sampleTurnLiveness();
       const response = await runtimeMessage({
         type: 'fleet:worker-hello',
+        ...liveness,
         activeAssignmentId: active?.assignment.id || pendingCompletion?.assignmentId || readAssignmentRecoveryHint() || null,
       });
       const nextRegistered = response?.registered === true;
