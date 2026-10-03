@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "program": "progressive-state-memory",
+  "verifiedHead": "dd554105f66981db42475eb9e8855f7c171e1702",
+  "branch": "main",
+  "entries": [
+    {"path":"extension/progressive-state-memory-m7-p1.js","sha256":"c272a8e61158cc7bf71f2cad50e346584b1c49f83c59df878a436fc78b207a5b"},
+    {"path":"extension/progressive-state-memory-m7-p2.js","sha256":"e49fa225d85290a0b75a405bd88ebb1cd049417aca04bcf2890f7635b8d7d474"},
+    {"path":"extension/progressive-state-memory-m7-p3.js","sha256":"5d201ba7cd3ad18fef1b07a49a73ba4bb819cf6a6b93d9e10f7155dc1cbd933e"},
+    {"path":"extension/progressive-state-memory-m7-p4.js","sha256":"319288cfee2c226786889dcdbfdbe6e0bd76922bed2afc709e0ea1120c3bcf9f"},
+    {"path":"extension/progressive-state-memory-m7-p5.js","sha256":"bb25e59d0937e3fb88ae4036876bba5c91ee7be56f32d50bd426a45c2378bb8d"},
+    {"path":"extension/progressive-state-memory-m7-p6.js","sha256":"fcf92e937bcf92c876ae97ce15191f291df98a4a5406464802f2aee2bac3e71d"},
+    {"path":"extension/progressive-state-memory-m7-p7.js","sha256":"8b6df42a92aa7586313f123d4d3500ae54825168c1d20b3f605e1bd84917e6b2"},
+    {"path":"extension/progressive-state-memory-m7-p8.js","sha256":"84d68a59c38875a576c657a2059c67688378d048892f5bf5fc56ef7176f10ed7"},
+    {"path":"extension/progressive-state-memory-m7-p9.js","sha256":"0e15369c53f416914461f62b5e615cc1ba436076848f6e04d31642d9834e0157"},
+    {"path":"extension/tests/progressive-state-memory-p1.test.cjs","sha256":"e900d4ad86f589244dcf74ab5d1d06c73fcb1391a88d363252fdb6f93b670503"},
+    {"path":"extension/tests/progressive-state-memory-p2.test.cjs","sha256":"8c04ecd0c9b9047a4a48da8795c81d18a561f836b80b0d58fbdbcc1f038064c3"},
+    {"path":"extension/tests/progressive-state-memory-p3.test.cjs","sha256":"6f343abfd91c64da06139ee20704cd35970b837c134fd21c5470780cb9a6a0e2"},
+    {"path":"extension/tests/progressive-state-memory-p4.test.cjs","sha256":"89c65b010c0c15afddbec5b418257ae81990a34d8a0673240d2a4cab8de56f03"},
+    {"path":"extension/tests/progressive-state-memory-p5.test.cjs","sha256":"06091b05f275f6061c00f696749e52fcfa3081f20da78a10e876ab3595fb839f"},
+    {"path":"extension/tests/progressive-state-memory-p6.test.cjs","sha256":"92f1ad9d2968b4b01e74fb2896419cb20199f82600c61156f6ea91b879e5ba65"},
+    {"path":"extension/tests/progressive-state-memory-p7.test.cjs","sha256":"792f5d783851999fa20e6b75aa66a84e6df65eec3657e40795571f2686a32b98"},
+    {"path":"extension/tests/progressive-state-memory-p8.test.cjs","sha256":"77c728cad146c3e18c2232e41751aa053c54751ef4905571e8fc733bb6ec0b0f"},
+    {"path":"extension/tests/progressive-state-memory-p9.test.cjs","sha256":"96b984b733a1ba9c36098766878319fc42c0c7dbb2ad136066eb1fe89d3ee453"},
+    {"path":"extension/tests/progressive-state-memory-p10-adversarial.test.cjs","sha256":"6cd32ada0317c9b7a7be0d835be1892fef8b5e07decd5b6392ea75c815bbde90"},
+    {"path":"extension/progressive-state-memory-m7-p12.js","sha256":"e8b4c4f407d4e34ceba6895fe92fab630e3c4e1a659bcd434e80403082c8fbd4"},
+    {"path":"extension/tests/progressive-state-memory-p12.test.cjs","sha256":"3c148b22bf49ec14cb157c6d50c4ed3fa5ed154bd46ca16ebbdea107c5b3c204"}
+  ]
+}
