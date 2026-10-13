@@ -1,0 +1,91 @@
+{
+  "schema": "model-fleet-next-r4-trial-v1",
+  "createdAtUtc": "2026-10-13T06:00:04.925411+00:00",
+  "status": "BLOCKED_TOOL_SAFETY; OPERATOR_RESTORED; NOT_ACCEPTED",
+  "authority": "docs/architecture/RUNTIME_GENESIS_ACCEPTANCE_SEQUENCE_V1.md",
+  "nextPort": 9226,
+  "isolatedProfile": "/workspace/.config/model-fleet-next-9226",
+  "sourceManifestDigest": "0637dd7733dc7fe2cc7b480ef05b320b7b6883da50e5ad8d38fa2216da5680f7",
+  "installedDigest": "fedd2a94be6857d48d2f68b48394d992aad07e16ee087db82404ff52e3893016",
+  "preflight": {
+    "authenticatedNewChatGPTProfile": true,
+    "roles": [
+      "coordinator",
+      "implementation",
+      "review"
+    ],
+    "exactR2Registration": true,
+    "R3SchedulerUnpausedNoWork": true,
+    "realConnectorMentionOnAllThreeWorkerComposers": true,
+    "healthyProductionSelfHealingEpoch1Closed": true
+  },
+  "fault": {
+    "type": "reversible Coordinator tab lifecycle frozen",
+    "workerId": "W-S0001",
+    "tabId": 1336996929,
+    "windowId": 1336996928,
+    "sourceDigest": "sha256:1b0f4c445a5dde7a9ee0b82a44c05aec3272e14e5d67187be328705d81de032d",
+    "stateAfterTrial": "operator-restored",
+    "operatorRestorationIsIndependentRepair": false
+  },
+  "healing": {
+    "epoch": 2,
+    "activationStatus": "blocked",
+    "repairMessages": [
+      {
+        "id": "M-1",
+        "phase": "blocked"
+      },
+      {
+        "id": "M-2",
+        "phase": "blocked"
+      },
+      {
+        "id": "M-3",
+        "phase": "delivered"
+      }
+    ],
+    "activeAssignments": 0,
+    "independentReviewAccepted": false
+  },
+  "implementationEvidence": {
+    "CanonWorkspaceAuthenticated": true,
+    "hostLocalCdp9226Reachable": true,
+    "extensionServiceWorkerPresent": true,
+    "recordedCoordinatorTabFrozen": true,
+    "coordinatorLifecycleRestorationAttempted": false,
+    "blockingLayer": "OpenAI tool safety",
+    "exactError": "This tool call was blocked by OpenAI because we couldn't determine the safety status of the request.",
+    "workerRespectedRefusal": true,
+    "alternativeRouteToBypassRefusalUsed": false
+  },
+  "evidence": {
+    "privateCheckpointReceipt": "/workspace/.local/state/model-fleet-next/checkpoints/2026-10-13T05-58-18-875Z-0c6322a568df/receipt.json",
+    "checkpointReceiptSha256": "5232b89a9847f05e709276985d45d8816c242ea0f8d5dcf9b4e19d94af883a4a",
+    "privateStateSha256": "0c6322a568df15c909a534a076b77f367a15f91dcd90c768286193f505b8c605",
+    "privateStateBytes": 85423,
+    "privateCheckpointNotPublished": true,
+    "faultMarkerPath": "/workspace/.local/state/model-fleet-next/r4-fault-active.json",
+    "faultMarkerSha256": "c4ee3b95491251d7c6f0caf0b1d4995bbc230078c8dd1e54ddce857050518a6a"
+  },
+  "safety": {
+    "schedulerPausedAfterFailure": true,
+    "noMessageReplay": true,
+    "oldDev9225Preserved": true,
+    "release9224Deployed": false,
+    "recoveryOverrideAttempted": false
+  },
+  "acceptance": {
+    "R2": "PASS_PRE_R4",
+    "R3": "PASS_PRE_R4",
+    "R4": "FAIL_CLOSED",
+    "R5": "NOT_RUN",
+    "R6": "NOT_RUN",
+    "GENESIS_ACCEPTED": false
+  },
+  "nextGate": "Do not repeat prohibited tab inspection or route around safety rejection. Establish explicitly authorized coordinator lifecycle verification and repair capability through approved product/tool access; then test a new bounded R4 lineage with separate W-S0003 verification.",
+  "repository": {
+    "gitHEAD": "19b5da220e40948e6ddf9eed8d3fee7b58439ce2",
+    "sourceChangesUncommittedPreserved": true
+  }
+}

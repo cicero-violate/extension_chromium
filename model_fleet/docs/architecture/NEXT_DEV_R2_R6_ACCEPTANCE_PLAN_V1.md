@@ -102,3 +102,16 @@ heartbeats. Current snapshot reports one missing tab and one unknown heartbeat,
 policy paused, zero tasks/messages/assignments. Next: safely reconcile
 Coordinator once and independently prove sustained R2, including actual app
 selection on each worker, before R3 unpause or any R4 fault injection.
+
+
+## R4 NEXT fault trial — tool safety boundary
+
+NEXT 9226 passed authenticated R2 and R3 again after one bounded Coordinator registration reconciliation. Each of the three worker composers selected the real Canon connector using the ChatGPT app picker; short Hyprland tiled windows required a temporary maximize to display the picker. Production healthy self-healing epoch 1 closed before the adversarial test.
+
+The NEXT-only R4 injector froze exact Coordinator W-S0001 with a 0600 marker. Production self-healing detected the fault in epoch 2 and created one bounded Implementation attempt plus one retry. Both attempts returned blocked and one operator escalation was delivered. No independent W-S0003 Review occurred. This is NOT R4 acceptance.
+
+Implementor W-S0002 successfully authenticated the Canon host workspace, reached CDP 9226, and confirmed the Coordinator tab was frozen. A read-only coordinator tab inspection received this exact OpenAI safety rejection: "This tool call was blocked by OpenAI because we couldn\'t determine the safety status of the request." The worker respected the rejection; no alternative-route bypass or unauthorized lifecycle restoration was attempted. This differs from the previous isolated-container localhost bug fixed by D14. Do NOT change prompts or routes to evade the safety refusal.
+
+After terminal zero-assignment proof, the scheduler was paused and Coordinator was restored through the operator-controlled exact-target emergency path. Restoration is NOT an accepted Implementation repair. A private, owner-only SHA-256 evidence checkpoint preserves epoch 2 and M-1/M-2/M-3. Trial receipt: docs/reports/state-model/MODEL_FLEET_NEXT_R4_TRIAL_V1.json. Old Dev 9225 and Release 9224 remained untouched.
+
+Next: obtain an explicitly authorized tool/product capability for exact frozen-tab inspection and lifecycle restoration that satisfies OpenAI tool safety. Do not retry the blocked inspection by changing tool routes. Only after authorization, open a separate bounded R4 lineage with new independent Review acceptance. The current R4/R5/R6 remain fail-closed.
