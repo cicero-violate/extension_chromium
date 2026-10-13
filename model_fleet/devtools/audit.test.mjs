@@ -64,6 +64,41 @@ test('D19 read-only state projection never reproduces prompts, message text, or 
  for(const secret of ['SECRET MUST NOT LEAK','PRIVATE','SENSITIVE','privatePrompt'])
   assert.equal(printed.includes(secret),false);
 });
+test('D20 incomplete worker bindings and zero/future heartbeats are explicit diagnostics',()=>{
+ const at=1800000000000;
+ const state={
+   workers:{
+     coordinator:{id:'W-S0001',role:'coordinator',enabled:true,tabId:null,
+       runtime:{lastHeartbeatAt:0}},
+     implementation:{id:'W-S0002',role:'implementation',enabled:true,tabId:22,
+       runtime:{lastHeartbeatAt:at-200000}},
+     review:{id:'W-S0003',role:'review',enabled:true,tabId:-2,
+       runtime:{lastHeartbeatAt:at+600000}}
+   },policy:{paused:true,authorityEnabled:true},
+   tasks:{},messages:[],assignments:{}
+ };
+ const r=summarizeState(state,at);
+ assert.equal(r.workerCount,3);
+ assert.equal(r.bindingRecordsMissingTab,2);
+ assert.equal(r.heartbeatRecordsMissing,2);
+ assert.equal(r.heartbeatRecordsStale,1);
+ assert.equal(r.workerRecordWarnings,5);
+ assert.equal(r.workers[0].tabBound,false);
+ assert.equal(r.workers[0].lastHeartbeatAgeSeconds,null);
+ assert.equal(r.workers[1].lastHeartbeatAgeSeconds,200);
+ assert.equal(r.workers[2].tabBound,false);
+ assert.equal(r.workers[2].lastHeartbeatAgeSeconds,null);
+ assert.equal(r.genesisAccepted,false);
+});
+test('D20 missing or malformed lastHeartbeatAt never becomes a fake huge age',()=>{
+ const at=1800000000000;
+ for(const invalid of [0,null,undefined,Infinity,NaN,-1,at+120000,'100']){
+   const r=summarizeState({workers:{X:{id:'W-S0001',tabId:1,
+     runtime:{lastHeartbeatAt:invalid}}}},at);
+   assert.equal(r.workers[0].lastHeartbeatAgeSeconds,null,String(invalid));
+   assert.equal(r.heartbeatRecordsMissing,1);
+ }
+});
 test('D19 sleeping worker is inconclusive, missing source is failure, neither is acceptance',()=>{
  assert.equal(decideStatus({sourceValid:true,targetsReadable:true,workerPresent:false}),
               'WORKER_DORMANT');

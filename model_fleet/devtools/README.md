@@ -21,6 +21,11 @@ and healing status.
 
 The report deliberately omits user messages, task instructions, prompts,
 cookies, access tokens, complete URLs, and raw Chrome profile content.
+Worker records include tabBound, nullable lastHeartbeatAgeSeconds,
+bindingRecordsMissingTab, heartbeatRecordsMissing, and heartbeatRecordsStale.
+Missing, zero, nonfinite, future, and invalid timestamps are reported
+as unknown, never fabricated as large ages. These are record-level warnings,
+not substitutes for live bridge identity or independent R2 acceptance.
 The sourceMatchesReceipt field establishes installed-source self-consistency;
 it is not a substitute for independent source acceptance or Release proof.
 

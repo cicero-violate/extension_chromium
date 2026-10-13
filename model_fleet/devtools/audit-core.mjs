@@ -44,16 +44,29 @@ export function summarizeState(input,now=Date.now()) {
     phases[phase]=(phases[phase]||0)+1;
   }
   const status=input.selfHealing?.activationStatus||null;
-  const mapped=workers.map(w=>({
-    id:String(w?.id||''),role:String(w?.role||''),enabled:w?.enabled===true,
-    tabBound:Number.isInteger(w?.tabId),hasAssignment:!!w?.currentAssignmentId,
-    lastHeartbeatAgeSeconds:Number.isFinite(w?.runtime?.lastHeartbeatAt)
-      ?Math.max(0,Math.round((now-w.runtime.lastHeartbeatAt)/1000)):null
-  })).sort((a,b)=>a.id.localeCompare(b.id,'en',{numeric:true}));
+  const validHeartbeat = value=>typeof value==='number'&&Number.isFinite(value)
+    && value>0&&value<=now;
+  const mapped=workers.map(w=>{
+    const heartbeat=w?.runtime?.lastHeartbeatAt;
+    const hasHeartbeat=validHeartbeat(heartbeat);
+    const age=hasHeartbeat?Math.max(0,Math.round((now-heartbeat)/1000)):null;
+    return {
+      id:String(w?.id||''),role:String(w?.role||''),enabled:w?.enabled===true,
+      tabBound:Number.isSafeInteger(w?.tabId)&&w.tabId>=0,
+      hasAssignment:!!w?.currentAssignmentId,
+      lastHeartbeatAgeSeconds:age
+    };
+  }).sort((a,b)=>a.id.localeCompare(b.id,'en',{numeric:true}));
+  const bindingRecordsMissingTab=mapped.filter(w=>!w.tabBound).length;
+  const heartbeatRecordsMissing=mapped.filter(w=>w.lastHeartbeatAgeSeconds===null).length;
+  const heartbeatRecordsStale=mapped.filter(w=>w.lastHeartbeatAgeSeconds!==null
+    &&w.lastHeartbeatAgeSeconds>90).length;
   return {
     available:true,policy:{paused:input.policy?.paused===true,authorityEnabled:input.policy?.authorityEnabled===true},
     generation:Number.isSafeInteger(input.generation)?input.generation:null,
     workers:mapped,workerCount:workers.length,taskCount:tasks.length,
+    bindingRecordsMissingTab,heartbeatRecordsMissing,heartbeatRecordsStale,
+    workerRecordWarnings:bindingRecordsMissingTab+heartbeatRecordsMissing+heartbeatRecordsStale,
     assignmentCount:assignments,messageCount:messages.length,
     messagePhases:phases,
     healing:{epoch:input.selfHealing?.activationEpoch??null,status},
